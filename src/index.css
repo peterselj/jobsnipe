@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+/*
+ * JobBoard's theme (copied from peterselj/JobBoard src/index.css): deep forest green + warm paper
+ * neutrals, Hanken Grotesk (UI) + IBM Plex Mono (numbers/data).
+ *
+ * We remap Tailwind's slate / emerald / green / amber / red / sky scales onto
+ * the new palette so the *entire* existing app (drawers, modals, Settings,
+ * Best Practices) inherits the look without rewriting every class. The new
+ * dashboard additionally uses the semantic tokens below (forest, paper, ink…).
+ */
+@theme {
+  --font-sans: "Hanken Grotesk", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Warm paper + ink (remaps slate) */
+  --color-slate-50:  #fbfbf8;
+  --color-slate-100: #f3f3ee;
+  --color-slate-200: #e6e6df;
+  --color-slate-300: #d4d5cc;
+  --color-slate-400: #9aa298;
+  --color-slate-500: #6f776d;
+  --color-slate-600: #3c453e;
+  --color-slate-700: #2b332c;
+  --color-slate-800: #222823;
+  --color-slate-900: #1b211d;
+
+  /* Forest + sage (remaps emerald) */
+  --color-emerald-50:  #eef4f0;
+  --color-emerald-100: #e0ebe4;
+  --color-emerald-200: #cfe0d4;
+  --color-emerald-300: #aebfb0;
+  --color-emerald-400: #7fa589;
+  --color-emerald-500: #5e8f72;
+  --color-emerald-600: #2f5e4a;
+  --color-emerald-700: #234c3a;
+  --color-emerald-800: #15352a;
+  --color-emerald-900: #0f2a21;
+
+  /* Gold (remaps amber — KPI/attention warm accent) */
+  --color-amber-50:  #faf4e8;
+  --color-amber-100: #f4ead2;
+  --color-amber-200: #ead9b8;
+  --color-amber-300: #dcc188;
+  --color-amber-700: #9a6b1f;
+  --color-amber-800: #855c1a;
+
+  /* Brick (remaps red — KPI/attention danger accent) */
+  --color-red-50:  #fbeeec;
+  --color-red-100: #f6ddd9;
+  --color-red-200: #eccfcb;
+  --color-red-300: #d9a59f;
+  --color-red-500: #b14a40;
+  --color-red-600: #9c3b32;
+  --color-red-700: #8a342c;
+
+  /* ---- Semantic tokens used by the new dashboard ---- */
+  --color-paper: #f3f3ee;
+  --color-paper-2: #fbfbf8;
+  --color-ink: #1b211d;
+  --color-ink-soft: #3c453e;
+  --color-muted: #6f776d;
+  --color-faint: #9aa298;
+  --color-line: #e6e6df;
+  --color-line-strong: #d4d5cc;
+  --color-forest: #234c3a;
+  --color-forest-2: #2f5e4a;
+  --color-forest-deep: #15352a;
+  --color-sage: #5e8f72;
+  --color-pale: #aebfb0;
+  --color-brick: #9c3b32;
+  --color-gold: #9a6b1f;
+}
+
+html, body { height: 100%; }
+html { scrollbar-gutter: stable; }
+
+body {
+  margin: 0;
+  background: #f3f3ee;
+  color: #1b211d;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbars — warm, thin */
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-thumb { background: #cdcfc6; border-radius: 4px; }
+.thin-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: #d4d5cc; border-radius: 3px; }
+
+select { -webkit-appearance: none; appearance: none; }
+
+
+kbd {
+  font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  background: #f0f1ec; border: 1px solid #d4d5cc; border-radius: 3px;
+  padding: 1px 5px; color: #6f776d;
+}
