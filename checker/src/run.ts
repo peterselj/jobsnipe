@@ -28,6 +28,14 @@ async function mapLimit<T>(items: T[], limit: number, fn: (t: T) => Promise<void
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/**
+ * The repo is public, so its Actions logs are too, and every signed-in person can read `runs`.
+ * Logs and stored errors therefore never name a person, company, board, job or email address:
+ * boards are referred to by their number, and URLs and email addresses are stripped from errors.
+ */
+export const redact = (text: string) =>
+  text.replace(/https?:\/\/\S+/g, "<url>").replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "<email>");
+
 export async function runCheck(opts: RunOptions): Promise<RunSummary> {
   const { store, mailer } = opts;
   const now = opts.now ?? new Date();
@@ -50,11 +58,11 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         const postings = await fetch(c.ats, c.board, c.name);
         fetched.set(c.id, postings);
         patch = { last_checked_at: iso, last_ok_at: iso, last_error: null, consecutive_failures: 0, failure_alert_sent: false, open_postings: postings.length };
-        log(`✓ ${c.name}: ${postings.length} open`);
+        log(`✓ board #${c.id}: ${postings.length} open`);
       } catch (e) {
         patch = { last_checked_at: iso, last_error: msg(e), consecutive_failures: c.consecutive_failures + 1 };
-        summary.errors.push(`${c.name}: ${msg(e)}`);
-        log(`✕ ${c.name}: ${msg(e)}`);
+        summary.errors.push(`board #${c.id}: ${redact(msg(e))}`);
+        log(`✕ board #${c.id}: ${redact(msg(e))}`);
       }
       Object.assign(c, patch);
       await store.updateCompany(c.id, patch);
@@ -124,10 +132,10 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
             alerted.add(key);
             newAlerts.push({ profile_id: person.id, posting_id: p.id });
             summary.alerts_sent++;
-            log(`  ✉ ${person.name}: ${p.company} "${p.title}"`);
+            log(`  ✉ new-match email sent`);
           } catch (e) {
             // Not recorded as sent, so the next run retries it.
-            summary.errors.push(`email to ${person.name} failed: ${msg(e)}`);
+            summary.errors.push(`match email failed: ${redact(msg(e))}`);
           }
         }
       }
@@ -144,9 +152,9 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
             alerted.add(`${person.id}|${p.id}`);
             newAlerts.push({ profile_id: person.id, posting_id: p.id });
           }
-          log(`  ✉ ${person.name}: watching summary (${summaryMatches.length} open matches)`);
+          log(`  ✉ watching-summary email sent (${summaryMatches.length} matches)`);
         } catch (e) {
-          summary.errors.push(`summary email to ${person.name} failed: ${msg(e)}`);
+          summary.errors.push(`summary email failed: ${redact(msg(e))}`);
         }
       }
       await store.recordAlerts(newAlerts);
@@ -168,7 +176,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
           summary.alerts_sent++;
         } catch (e) {
           allSent = false;
-          summary.errors.push(`health email to ${person.name} failed: ${msg(e)}`);
+          summary.errors.push(`broken-board email failed: ${redact(msg(e))}`);
         }
       }
       if (allSent) for (const c of failing) await store.updateCompany(c.id, { failure_alert_sent: true });
@@ -176,7 +184,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
 
     await store.prune(now);
   } catch (e) {
-    summary.errors.push(`run failed: ${msg(e)}`);
+    summary.errors.push(`run failed: ${redact(msg(e))}`);
     throw e;
   } finally {
     await store.finishRun(runId, summary);

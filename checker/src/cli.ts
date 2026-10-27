@@ -19,7 +19,8 @@ if (!url || !key) {
 }
 
 const mailer = makeMailer(process.env, { dryRun: values["dry-run"] });
-console.log(`JobSnipe check (${values.trigger}) · ${mailer.describe}`);
+// No sender address here: this log is public (see redact in run.ts).
+console.log(`JobSnipe check (${values.trigger}) · ${mailer.describe.startsWith("Brevo") ? "sending through Brevo" : mailer.describe}`);
 
 const run = await runCheck({ store: new SupabaseStore(url, key), mailer, trigger: values.trigger, log: console.log });
 console.log(`done: ${run.companies_checked} boards, ${run.new_postings} new postings, ${run.alerts_sent} emails, ${run.errors.length} errors`);

@@ -177,3 +177,26 @@ describe("mailer", () => {
     expect(() => makeMailer({ BREVO_API_KEY: "k" })).toThrow(/MAIL_FROM/);
   });
 });
+
+describe("public logs", () => {
+  it("never name people, companies, jobs or addresses", async () => {
+    const { store, mailer } = setup();
+    const lines: string[] = [];
+    let broken = false;
+    const fetch = async () => {
+      if (broken) throw new Error("HTTP 404 from https://boards-api.greenhouse.io/v1/boards/acme/jobs");
+      return [job("1")];
+    };
+    await runCheck({ store, mailer, fetch, now: at(1), log: (l) => lines.push(l) });
+    await runCheck({ store, mailer, fetch: async () => [job("1"), job("2")], now: at(2), log: (l) => lines.push(l) });
+    broken = true;
+    const s = await runCheck({ store, mailer, fetch, now: at(3), log: (l) => lines.push(l) });
+    const failing: Mailer = { describe: "x", send: async () => { throw new Error("Brevo 400: invalid email josh@example.com"); } };
+    const s2 = await runCheck({ store, mailer: failing, fetch: async () => [job("1"), job("2"), job("3")], now: at(4), log: (l) => lines.push(l) });
+    const everything = [...lines, ...s.errors, ...s2.errors].join("\n");
+    expect(everything).toMatch(/board #1/);
+    for (const secret of ["Acme", "acme", "Josh", "josh", "Senior Product Manager", "greenhouse.io", "@example.com", "Corner Store"]) {
+      expect(everything, secret).not.toContain(secret);
+    }
+  });
+});
