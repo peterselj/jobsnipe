@@ -12,7 +12,10 @@ that fits is posted, so you can be one of the first applicants. Sign in with jus
   stay listed even after the posting closes.
 - **Companies:** add one by name or by pasting any of its job links (it searches Greenhouse, Lever
   and Ashby), fix or remove it, and see whether each board is being read OK.
-- **Settings:** job titles to include and exclude, senior-and-up, places, remote countries, pay floor.
+- **Near misses:** roles in your job family that missed by just one filter (pay, place or level), with
+  what each filter is hiding shown in Settings, so you can tell when to loosen one.
+- **Settings:** job titles to include and exclude, senior-and-up, places, remote countries, pay floor,
+  pause alerts, delete account. Any company can have its own tweaks (e.g. "Toronto only here").
 - **Alerts:** one email per new match, a "now watching" summary when you add a company, and a
   warning if a company's board stops working.
 

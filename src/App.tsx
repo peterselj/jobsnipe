@@ -175,6 +175,25 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
       <div className="mx-auto max-w-6xl px-4">
         {check.state === 'running' && <p className="mt-3 text-xs text-muted">Checking every board. Usually about a minute; any new match is emailed too.</p>}
         {check.state === 'failed' && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">The check didn't finish. The hourly check will try again.</p>}
+        {snap.profile.alerts_paused && (
+          <p className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Email alerts are paused. Your inbox here still updates.
+            <button
+              className="font-semibold underline underline-offset-2"
+              onClick={async () => {
+                try {
+                  await source.saveProfile({ alerts_paused: false });
+                  await reload();
+                  flash('Alerts are back on.');
+                } catch (e) {
+                  fail(e);
+                }
+              }}
+            >
+              Resume
+            </button>
+          </p>
+        )}
         {notice && <p className="mt-3 rounded-md bg-emerald-50 px-3 py-2 text-sm text-forest">{notice}</p>}
         {error && (
           <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -187,6 +206,15 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
         <main className="px-4 py-6">
           <Settings
             profile={snap.profile}
+            nearMisses={snap.matches.filter((m) => m.nearMiss)}
+            onPause={async (paused) => {
+              await source.saveProfile({ alerts_paused: paused });
+              await reload(); // the banner and the card show the new state
+            }}
+            onDelete={async () => {
+              await source.deleteAccount();
+              onLeave();
+            }}
             onCancel={() => setView('matches')}
             onSave={async (patch) => {
               await source.saveProfile(patch);
@@ -208,6 +236,12 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
           <aside>
             <Companies
               watches={snap.watches}
+              criteria={snap.profile.criteria}
+              onSetFilters={async (w, filters) => {
+                await source.setWatchFilters(w.id, filters);
+                await reload();
+                void runCheck(`${w.name}'s filters are applied.`);
+              }}
               onAdd={async (w) => {
                 await source.addWatch(w);
                 await reload();

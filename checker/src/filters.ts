@@ -73,21 +73,23 @@ export function locationCheck(post: Posting, f: Filters): { where?: string; flag
   return { where: "Remote (scope unclear)", flags };
 }
 
+const shortMoney = (currency: string, n: number) => `${currency === "CAD" ? "CA$" : currency === "USD" ? "$" : `${currency} `}${Math.round(n / 1000)}K`;
+
 export function evaluate(post: Posting, f: Filters): FilterResult {
-  const reasons: string[] = [];
+  const failed: FilterResult["failed"] = [];
   const titleFail = titleCheck(post.title, f);
-  if (titleFail) reasons.push(titleFail);
+  if (titleFail) failed.push({ check: "title", detail: titleFail });
   const level = seniorityCheck(post, f);
-  if (level.fail) reasons.push(level.fail);
+  if (level.fail) failed.push({ check: "seniority", detail: "No senior level in the title" });
 
   const loc = locationCheck(post, f);
-  if (!loc.where) reasons.push(`location (${post.locations.join("; ") || "none listed"})`);
+  if (!loc.where) failed.push({ check: "location", detail: post.locations.join("; ") || "No location listed" });
 
   const flags = [...loc.flags, ...(level.flag ? [level.flag] : [])];
   if (post.comp) {
     const floor = f.comp_floor[post.comp.currency];
     if (floor !== undefined && post.comp.max < floor) {
-      reasons.push(`comp tops out at ${post.comp.currency} ${post.comp.max.toLocaleString("en-US")}`);
+      failed.push({ check: "pay", detail: `Pay tops out at ${shortMoney(post.comp.currency, post.comp.max)} (your floor: ${shortMoney(post.comp.currency, floor)})` });
     } else if (floor === undefined) {
       flags.push(`pay listed in ${post.comp.currency}; no floor set for that currency`);
     }
@@ -95,5 +97,15 @@ export function evaluate(post: Posting, f: Filters): FilterResult {
     flags.push("no pay range listed");
   }
 
-  return { pass: reasons.length === 0, reasons, flags, where: loc.where };
+  const reasons = failed.map((x) => (x.check === "location" ? `location (${x.detail})` : x.detail));
+  return { pass: failed.length === 0, reasons, failed, flags, where: loc.where };
+}
+
+/**
+ * A near miss: right job family (title fits), but exactly one other check failed. These are the
+ * roles a person might want if they loosened one filter, so they're shown, never emailed.
+ */
+export function nearMiss(r: FilterResult): { check: Exclude<FilterResult["failed"][number]["check"], "title">; detail: string } | undefined {
+  if (r.failed.length !== 1 || r.failed[0].check === "title") return undefined;
+  return r.failed[0] as { check: "seniority" | "location" | "pay"; detail: string };
 }

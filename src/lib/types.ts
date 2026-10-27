@@ -1,7 +1,7 @@
 import type { Ats } from '../../shared/ats';
-import type { Criteria } from '../../shared/criteria';
+import type { Criteria, WatchFilters } from '../../shared/criteria';
 
-export type { Ats, Criteria };
+export type { Ats, Criteria, WatchFilters };
 
 export interface Profile {
   id: string;
@@ -9,6 +9,7 @@ export interface Profile {
   email: string;
   criteria: Criteria;
   alert_mode: string;
+  alerts_paused: boolean;
 }
 
 export interface Match {
@@ -21,6 +22,9 @@ export interface Match {
   comp?: { min: number; max: number; currency: string };
   atsPostedAt?: string;
   firstSeenAt: string;
+  /** Set for a near miss: the one check it failed, and why. */
+  nearMiss?: 'seniority' | 'location' | 'pay';
+  missDetail?: string;
 }
 
 /** A company someone follows, with how its board is doing. */
@@ -35,6 +39,8 @@ export interface Watch {
   openPostings?: number;
   lastCheckedAt?: string;
   lastError?: string;
+  /** Tweaks to the usual filters for this company only. */
+  filters?: WatchFilters;
 }
 
 /** What "Add company" produces. ats 'none' = list it without monitoring. */

@@ -3,7 +3,10 @@ import { ago, money } from '../../shared/format';
 import type { Feedback, Match, Verdict } from '../lib/types';
 import { Button } from './ui';
 
-type Folder = 'inbox' | 'interested' | 'not_for_me';
+type Folder = 'inbox' | 'interested' | 'not_for_me' | 'near';
+type MissCheck = NonNullable<Match['nearMiss']>;
+
+export const MISS_LABEL: Record<MissCheck, string> = { pay: 'Pay', location: 'Place', seniority: 'Level' };
 
 interface Props {
   matches: Match[];
@@ -22,9 +25,13 @@ const DAY = 86_400_000;
  */
 export default function Matches({ matches, feedback, onVerdict, needsFilters, onOpenSettings }: Props) {
   const [folder, setFolder] = useState<Folder>('inbox');
+  const [missFilter, setMissFilter] = useState<MissCheck | null>(null);
   const open = new Map(matches.map((m) => [m.id, m]));
 
-  const inbox = matches.filter((m) => !feedback[m.id]);
+  const inbox = matches.filter((m) => !m.nearMiss && !feedback[m.id]);
+  // Near misses: right job family, missed by one filter. Marking one Interested moves it to Interested.
+  const near = matches.filter((m) => m.nearMiss && !feedback[m.id]);
+  const missCounts = near.reduce<Partial<Record<MissCheck, number>>>((acc, m) => ({ ...acc, [m.nearMiss!]: (acc[m.nearMiss!] ?? 0) + 1 }), {});
   // Decided roles come from the verdicts, so they stay listed after the posting closes.
   const decided = (v: Verdict['verdict']) =>
     Object.entries(feedback)
@@ -35,6 +42,7 @@ export default function Matches({ matches, feedback, onVerdict, needsFilters, on
     inbox,
     interested: decided('interested'),
     not_for_me: decided('not_for_me'),
+    near: missFilter ? near.filter((m) => m.nearMiss === missFilter) : near,
   };
   const shown = lists[folder];
 
@@ -42,6 +50,7 @@ export default function Matches({ matches, feedback, onVerdict, needsFilters, on
     { key: 'inbox', label: 'Inbox' },
     { key: 'interested', label: '★ Interested' },
     { key: 'not_for_me', label: 'Not for me' },
+    { key: 'near', label: 'Near misses' },
   ];
 
   return (
@@ -59,11 +68,34 @@ export default function Matches({ matches, feedback, onVerdict, needsFilters, on
           >
             {t.label}
             <span className={`rounded-full px-1.5 py-px font-mono text-[10px] ${t.key === 'inbox' && inbox.length ? 'bg-forest text-white' : 'bg-slate-200 text-ink-soft'}`}>
-              {lists[t.key].length}
+              {t.key === 'near' ? near.length : lists[t.key].length}
             </span>
           </button>
         ))}
       </div>
+
+      {folder === 'near' && near.length > 0 && (
+        <div className="mb-3 rounded-xl border border-line bg-white px-4 py-3">
+          <p className="text-sm text-ink-soft">
+            Roles in your job family that your filters hid for <b>one</b> reason. Never emailed. If a pattern shows up, adjust
+            that filter in{' '}
+            {onOpenSettings ? <button className="font-semibold text-forest underline-offset-2 hover:underline" onClick={onOpenSettings}>Settings</button> : 'Settings'}.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {([null, 'pay', 'location', 'seniority'] as (MissCheck | null)[]).map((k) =>
+              k && !missCounts[k] ? null : (
+                <button
+                  key={k ?? 'all'}
+                  onClick={() => setMissFilter(k)}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${missFilter === k ? 'border-forest bg-emerald-50 text-forest' : 'border-line-strong text-ink-soft hover:bg-paper'}`}
+                >
+                  {k ? `${MISS_LABEL[k]} · ${missCounts[k]}` : `All · ${near.length}`}
+                </button>
+              ),
+            )}
+          </div>
+        </div>
+      )}
 
       {shown.length === 0 ? (
         <Empty folder={folder} needsFilters={needsFilters} onOpenSettings={onOpenSettings} />
@@ -92,6 +124,7 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
     inbox: ['No new roles!', "You're all caught up. JobSnipe checks every hour and emails you when something new fits."],
     interested: ['Nothing starred yet', 'Mark a role ★ Interested and it lands here, even after the posting closes.'],
     not_for_me: ['Nothing dismissed', 'Roles you mark Not for me are kept here, out of your way.'],
+    near: ['No near misses', 'Roles your filters hid for just one reason (pay, place or level) show up here.'],
   }[folder];
   return (
     <div className="rounded-xl border border-dashed border-line-strong bg-white/60 px-5 py-10 text-center">
@@ -105,7 +138,7 @@ function MatchCard({ m, verdict, onVerdict }: { m: Match & { closed?: boolean };
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState('');
   const interested = verdict?.verdict === 'interested';
-  const isNew = !verdict && Date.now() - Date.parse(m.firstSeenAt) < DAY;
+  const isNew = !verdict && !m.nearMiss && Date.now() - Date.parse(m.firstSeenAt) < DAY;
   const facts = m.closed
     ? ['Posting closed or no longer matches']
     : [m.where, m.comp && money(m.comp), m.atsPostedAt && `posted ${ago(m.atsPostedAt)}`].filter(Boolean);
@@ -135,6 +168,11 @@ function MatchCard({ m, verdict, onVerdict }: { m: Match & { closed?: boolean };
             <div className="mt-0.5 text-[16px] font-bold leading-snug text-forest-2">{m.title}</div>
           )}
           <div className="mt-1 text-sm text-ink-soft">{facts.join(' · ')}</div>
+          {m.nearMiss && (
+            <div className="mt-1 text-[13px] text-brick">
+              ✕ {m.nearMiss === 'location' ? `Outside your places: ${m.missDetail}` : m.missDetail}
+            </div>
+          )}
           {m.flags.length > 0 && <div className="mt-1 text-[13px] text-gold">⚑ {m.flags.join(' · ')}</div>}
           {verdict?.reason && <div className="mt-1 text-[13px] text-muted">“{verdict.reason}”</div>}
         </div>
@@ -145,7 +183,7 @@ function MatchCard({ m, verdict, onVerdict }: { m: Match & { closed?: boolean };
           ) : (
             !asking && (
               <>
-                <Button size="sm" onClick={() => onVerdict(m, 'interested')}>★ Interested</Button>
+                <Button size="sm" onClick={() => onVerdict(m, 'interested')}>{m.nearMiss ? '★ Interested anyway' : '★ Interested'}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>Not for me</Button>
               </>
             )

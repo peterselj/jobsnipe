@@ -109,7 +109,7 @@ describe("runCheck", () => {
     await runCheck({ store, mailer, fetch, now: at(1), trigger: "schedule" });
     expect(sent.map((e) => e.subject)).toEqual(["JobSnipe is watching: 1 open matches"]);
     expect(sent[0].text).toMatch(/Corner Store: own site/);
-    expect(store.matches.get(JOSH)?.map((m) => m.posting_id)).toEqual(["greenhouse:acme:1"]);
+    expect(store.matches.get(JOSH)?.filter((m) => !m.near_miss).map((m) => m.posting_id)).toEqual(["greenhouse:acme:1"]);
     expect(store.matches.get(JAKE)).toEqual([]); // no filters set yet, so nothing matches
 
     await runCheck({ store, mailer, fetch, now: at(2) });
@@ -234,10 +234,13 @@ describe("efficiency", () => {
     const fetch = async () => ({ postings: board });
     await runCheck({ store, mailer, fetch, fetchComp, now: at(1) });
     expect(asked).toEqual(["greenhouse:acme:1"]); // not the engineer role
-    expect(store.matches.get(JOSH)).toEqual([]); // pay below the floor, so no match
+    // Pay below the floor: not a match, but a near miss.
+    expect(store.matches.get(JOSH)).toEqual([
+      { profile_id: JOSH, posting_id: "greenhouse:acme:1", where_label: "NYC area", flags: [], near_miss: "pay", miss_detail: "Pay tops out at $120K (your floor: $140K)" },
+    ]);
     await runCheck({ store, mailer, fetch, fetchComp, now: at(2) });
     expect(asked).toHaveLength(1); // known postings reuse the stored pay
-    expect(store.matches.get(JOSH)).toEqual([]);
+    expect(store.matches.get(JOSH)?.[0].near_miss).toBe("pay");
     board = [...board, job("5")];
     await runCheck({ store, mailer, fetch, fetchComp, now: at(3) });
     expect(asked).toEqual(["greenhouse:acme:1", "greenhouse:acme:5"]);
@@ -287,5 +290,68 @@ describe("unchanged boards", () => {
     expect(store.postings.get("greenhouse:acme:7")!.comp).toEqual({ min: 150000, max: 170000, currency: "USD" });
     await runCheck({ store, mailer, fetch, fetchComp, now: at(3) });
     expect(asked).toHaveLength(2); // never twice
+  });
+});
+
+describe("near misses", () => {
+  it("are roles in the job family that failed exactly one other check, and are never emailed", async () => {
+    const { store, sent, mailer } = setup();
+    const board = [
+      job("1"), // match
+      post({ id: "greenhouse:acme:2", title: "Senior Product Manager", locations: ["San Francisco, CA"], compChecked: true }), // place only
+      post({ id: "greenhouse:acme:3", title: "Product Manager, Data", compChecked: true }), // seniority only
+      post({ id: "greenhouse:acme:4", title: "Product Manager, Data", locations: ["Austin, TX"], compChecked: true }), // two misses: not shown
+      post({ id: "greenhouse:acme:5", title: "Software Engineer", compChecked: true }), // wrong family: not shown
+    ];
+    await runCheck({ store, mailer, fetch: async () => ({ postings: board }), now: at(1) });
+    const rows = store.matches.get(JOSH)!;
+    expect(rows.map((m) => [m.posting_id.split(":")[2], m.near_miss ?? "match", m.miss_detail ?? ""])).toEqual([
+      ["1", "match", ""],
+      ["2", "location", "San Francisco, CA"],
+      ["3", "seniority", "No senior level in the title"],
+    ]);
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [...board, post({ id: "greenhouse:acme:6", locations: ["Seattle, WA"], compChecked: true })] }), now: at(2) });
+    expect(sent.filter((e) => e.subject.startsWith("New match"))).toHaveLength(0); // the new near miss isn't emailed
+  });
+});
+
+describe("per-company filters", () => {
+  it("can narrow one company to some places and skip extra title words there", async () => {
+    const { store, sent, mailer } = setup();
+    store.watches_[0].filters = { locations: [{ name: "Toronto area", match: ["toronto"] }], remote: { allowed: false }, exclude_titles: ["technical"] };
+    const board = [
+      job("1"), // NYC: outside this company's places → near miss
+      post({ id: "greenhouse:acme:2", locations: ["Toronto, ON"], compChecked: true }), // match
+      post({ id: "greenhouse:acme:3", title: "Senior Product Manager (Technical)", locations: ["Toronto, ON"], compChecked: true }), // skipped word
+      post({ id: "greenhouse:acme:4", locations: ["Remote, United States"], compChecked: true }), // remote off here → near miss
+    ];
+    await runCheck({ store, mailer, fetch: async () => ({ postings: board }), now: at(1) });
+    const rows = store.matches.get(JOSH)!;
+    expect(rows.filter((m) => !m.near_miss).map((m) => m.posting_id)).toEqual(["greenhouse:acme:2"]);
+    expect(rows.filter((m) => m.near_miss).map((m) => [m.posting_id, m.near_miss])).toEqual([
+      ["greenhouse:acme:1", "location"],
+      ["greenhouse:acme:4", "location"],
+    ]);
+    expect(sent[0].text).toMatch(/1 matching roles/);
+  });
+});
+
+describe("paused alerts", () => {
+  it("send nothing, keep the page up to date, and don't flood on resume", async () => {
+    const { store, sent, mailer } = setup();
+    store.people_[0].alerts_paused = true;
+    let board = [job("1")];
+    const fetch = async () => ({ postings: board });
+    await runCheck({ store, mailer, fetch, now: at(1) });
+    board = [job("1"), job("2")];
+    await runCheck({ store, mailer, fetch, now: at(2) });
+    expect(sent).toHaveLength(0);
+    expect(store.matches.get(JOSH)?.map((m) => m.posting_id)).toEqual(["greenhouse:acme:1", "greenhouse:acme:2"]);
+    store.people_[0].alerts_paused = false;
+    await runCheck({ store, mailer, fetch, now: at(3) });
+    expect(sent).toHaveLength(0); // what was found while paused isn't sent late
+    board = [...board, job("3")];
+    await runCheck({ store, mailer, fetch, now: at(4) });
+    expect(sent.map((e) => e.subject)).toEqual(["New match: Senior Product Manager at Acme (NYC area)"]);
   });
 });

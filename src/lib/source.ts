@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { Ats, Feedback, Match, NewWatch, Profile, Run, Snapshot, Verdict, Watch } from './types';
+import type { Ats, Feedback, Match, NewWatch, Profile, Run, Snapshot, Verdict, Watch, WatchFilters } from './types';
 
 /** Everything the page reads and writes. SupabaseSource is the real one; DemoSource backs the demo. */
 export interface DataSource {
@@ -9,7 +9,11 @@ export interface DataSource {
   addWatch(w: NewWatch): Promise<void>;
   changeBoard(watchId: number, ats: Ats, board: string): Promise<void>;
   removeWatch(watchId: number): Promise<void>;
-  saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria'>>): Promise<void>;
+  /** null = back to the usual filters for this company. */
+  setWatchFilters(watchId: number, filters: WatchFilters | null): Promise<void>;
+  saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused'>>): Promise<void>;
+  /** Permanently delete the signed-in account and everything about it. */
+  deleteAccount(): Promise<void>;
   /** Starts a check; returns the time to wait for a run after. */
   requestCheck(): Promise<string>;
   latestRun(): Promise<Run | undefined>;
@@ -39,15 +43,15 @@ export class SupabaseSource implements DataSource {
 
   async load(): Promise<Snapshot> {
     const [profile, watches, matches, verdicts, run] = await Promise.all([
-      this.db.from('profiles').select('id, name, email, criteria, alert_mode').eq('id', this.userId).single(),
+      this.db.from('profiles').select('id, name, email, criteria, alert_mode, alerts_paused').eq('id', this.userId).single(),
       this.db
         .from('watches')
-        .select('id, name, careers_url, note, company_id, companies(ats, board, last_checked_at, last_error, consecutive_failures, open_postings)')
+        .select('id, name, careers_url, note, filters, company_id, companies(ats, board, last_checked_at, last_error, consecutive_failures, open_postings)')
         .order('created_at'),
       this.db
         .from('matches')
-        .select('where_label, flags, postings(id, company_id, title, url, ats_posted_at, comp_min, comp_max, comp_currency, first_seen_at)')
-        .limit(1000),
+        .select('where_label, flags, near_miss, miss_detail, postings(id, company_id, title, url, ats_posted_at, comp_min, comp_max, comp_currency, first_seen_at)')
+        .limit(2000),
       this.db.from('verdicts').select('*').limit(5000),
       this.latestRun(),
     ]);
@@ -71,6 +75,7 @@ export class SupabaseSource implements DataSource {
         openPostings: c?.open_postings ?? undefined,
         lastCheckedAt: c?.last_checked_at ?? undefined,
         lastError: c?.last_error ?? undefined,
+        filters: w.filters ?? undefined,
       };
     });
 
@@ -88,6 +93,8 @@ export class SupabaseSource implements DataSource {
           comp: p.comp_min != null && p.comp_max != null ? { min: p.comp_min, max: p.comp_max, currency: p.comp_currency } : undefined,
           atsPostedAt: p.ats_posted_at ?? undefined,
           firstSeenAt: p.first_seen_at,
+          nearMiss: m.near_miss ?? undefined,
+          missDetail: m.miss_detail ?? undefined,
         };
       })
       .sort((a, b) => b.firstSeenAt.localeCompare(a.firstSeenAt) || (b.atsPostedAt ?? '').localeCompare(a.atsPostedAt ?? ''));
@@ -97,7 +104,13 @@ export class SupabaseSource implements DataSource {
       feedback[v.posting_id] = { verdict: v.verdict, reason: v.reason ?? undefined, at: v.created_at, company: v.company ?? '', title: v.title ?? '', url: v.url ?? undefined };
     }
 
-    return { profile: { ...profile.data, criteria: profile.data.criteria ?? {} }, watches: ws, matches: ms, feedback, lastRun: run };
+    return {
+      profile: { ...profile.data, criteria: profile.data.criteria ?? {}, alerts_paused: !!profile.data.alerts_paused },
+      watches: ws,
+      matches: ms,
+      feedback,
+      lastRun: run,
+    };
   }
 
   async setVerdict(m: Pick<Match, 'id' | 'company' | 'title' | 'url'>, v: Verdict | null) {
@@ -139,9 +152,19 @@ export class SupabaseSource implements DataSource {
     fail('Removing company', error);
   }
 
-  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria'>>) {
+  async setWatchFilters(watchId: number, filters: WatchFilters | null) {
+    const { error } = await this.db.from('watches').update({ filters }).eq('id', watchId);
+    fail('Saving company filters', error);
+  }
+
+  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused'>>) {
     const { error } = await this.db.from('profiles').update(patch).eq('id', this.userId);
     fail('Saving settings', error);
+  }
+
+  async deleteAccount() {
+    const { error } = await this.db.rpc('delete_my_account');
+    fail('Deleting your account', error);
   }
 
   async requestCheck() {

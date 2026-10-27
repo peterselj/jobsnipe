@@ -1,8 +1,9 @@
 import { boardUrl, compFetchers, fetchers } from "./ats/index.js";
 import { baselineEmail, healthEmail, matchEmail, type BaselineCompany, type Mailer } from "./email.js";
-import { evaluate, titleCheck, toFilters } from "./filters.js";
-import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting } from "./store.js";
-import type { Ats, BoardResult, FilterResult, Posting } from "./types.js";
+import { withWatchFilters } from "../../shared/criteria.js";
+import { evaluate, nearMiss, titleCheck, toFilters } from "./filters.js";
+import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "./store.js";
+import type { Ats, BoardResult, Filters, FilterResult, Posting } from "./types.js";
 
 /** Consecutive failed checks before we email about a broken board (2 = about two hours). */
 export const FAILURE_ALERT_AFTER = 2;
@@ -80,7 +81,15 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
 
     // 2. Save only what changed on each board and work out what's open. Unchanged or failed boards
     //    use what's stored. Pay is looked up once per posting, only if its title fits someone.
-    const filtersOf = new Map(people.map((p) => [p.id, toFilters(p.criteria)]));
+    // The filters for one watch: the person's usual ones plus any tweaks for that company.
+    const personById = new Map(people.map((p) => [p.id, p]));
+    const filterCache = new Map<number, Filters>();
+    const filtersFor = (w: WatchRow): Filters | undefined => {
+      const person = personById.get(w.profile_id);
+      if (!person) return undefined;
+      if (!filterCache.has(w.id)) filterCache.set(w.id, toFilters(withWatchFilters(person.criteria, w.filters)));
+      return filterCache.get(w.id);
+    };
     const open = new Map<number, StoredPosting[]>();
     for (const c of companies.values()) {
       const result = fetched.get(c.id);
@@ -102,7 +111,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         changes.closed = [...known].filter(([id, k]) => !k.closed && !current.has(id)).map(([id]) => id);
       }
 
-      const watchers = watches.filter((w) => w.company_id === c.id).map((w) => filtersOf.get(w.profile_id)!).filter(Boolean);
+      const watchers = watches.filter((w) => w.company_id === c.id).map(filtersFor).filter((f): f is Filters => !!f);
       const needPay = postings
         .filter((p) => p.compChecked === false && watchers.some((f) => !titleCheck(p.title, f)))
         .slice(0, MAX_PAY_LOOKUPS);
@@ -130,8 +139,11 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     // 3. Per person: matches for the page, a summary for newly watched companies, an email per new match.
     const alerted = await store.alerted();
     for (const person of people) {
-      const filters = filtersOf.get(person.id)!;
       const mine = watches.filter((w) => w.profile_id === person.id);
+      // While alerts are paused nothing is emailed, but alerts are still recorded as handled so
+      // resuming doesn't send everything found in the meantime.
+      const paused = !!person.alerts_paused;
+      const deliver = (e: Parameters<Mailer["send"]>[0]) => (paused ? Promise.resolve() : mailer.send(e));
       const matches: MatchRow[] = [];
       const summaryMatches: { p: Posting; r: FilterResult }[] = [];
       const summaryCompanies: BaselineCompany[] = [];
@@ -147,13 +159,25 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
           continue;
         }
         const c = companies.get(w.company_id)!;
+        const filters = filtersFor(w)!;
         const checkedNow = fetched.has(c.id);
         const results = (open.get(c.id) ?? []).map((p) => {
           const shown = { ...p, company: w.name }; // each person's own name for the company
           return { p: shown, r: evaluate(shown, filters) };
         });
         const passing = results.filter((x) => x.r.pass);
-        for (const { p, r } of passing) matches.push({ profile_id: person.id, posting_id: p.id, where_label: r.where ?? null, flags: r.flags });
+        for (const { p, r } of results) {
+          const miss = r.pass ? undefined : nearMiss(r);
+          if (!r.pass && !miss) continue;
+          matches.push({
+            profile_id: person.id,
+            posting_id: p.id,
+            where_label: r.where ?? null,
+            flags: r.flags,
+            near_miss: miss?.check ?? null,
+            miss_detail: miss?.detail ?? null,
+          });
+        }
 
         if (!w.baselined_at) {
           // First look for this person: one summary of what's already open, not an email per posting.
@@ -173,11 +197,11 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
           const key = `${person.id}|${p.id}`;
           if (alerted.has(key) || Date.parse(p.firstSeenAt) <= since) continue;
           try {
-            await mailer.send(matchEmail(person.email, p, r, now));
+            await deliver(matchEmail(person.email, p, r, now));
             alerted.add(key);
             newAlerts.push({ profile_id: person.id, posting_id: p.id });
-            summary.alerts_sent++;
-            log(`  ✉ new-match email sent`);
+            if (!paused) summary.alerts_sent++;
+            log(paused ? "  – new match (alerts paused)" : "  ✉ new-match email sent");
           } catch (e) {
             // Not recorded as sent, so the next run retries it.
             summary.errors.push(`match email failed: ${redact(msg(e))}`);
@@ -190,14 +214,14 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
       if (toBaseline.length) {
         summaryMatches.sort((a, b) => (b.p.atsPostedAt ?? "").localeCompare(a.p.atsPostedAt ?? ""));
         try {
-          await mailer.send(baselineEmail(person.email, summaryMatches, summaryCompanies, now));
-          summary.alerts_sent++;
+          await deliver(baselineEmail(person.email, summaryMatches, summaryCompanies, now));
+          if (!paused) summary.alerts_sent++;
           await store.markBaselined(toBaseline, iso);
           for (const { p } of summaryMatches) {
             alerted.add(`${person.id}|${p.id}`);
             newAlerts.push({ profile_id: person.id, posting_id: p.id });
           }
-          log(`  ✉ watching-summary email sent (${summaryMatches.length} matches)`);
+          log(paused ? "  – watching summary (alerts paused)" : `  ✉ watching-summary email sent (${summaryMatches.length} matches)`);
         } catch (e) {
           summary.errors.push(`summary email failed: ${redact(msg(e))}`);
         }
@@ -210,6 +234,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     if (failing.length) {
       let allSent = true;
       for (const person of people) {
+        if (person.alerts_paused) continue;
         const mine = watches.filter((w) => w.profile_id === person.id && failing.some((c) => c.id === w.company_id));
         if (!mine.length) continue;
         const list = mine.map((w) => {

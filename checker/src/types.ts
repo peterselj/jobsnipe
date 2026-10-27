@@ -1,7 +1,7 @@
 import type { Ats } from "../../shared/ats.js";
-import type { Criteria } from "../../shared/criteria.js";
+import type { Criteria, WatchFilters } from "../../shared/criteria.js";
 
-export type { Ats, Criteria };
+export type { Ats, Criteria, WatchFilters };
 
 /** Criteria with defaults filled in and terms lowercased, ready for the filters. */
 export interface Filters {
@@ -18,6 +18,8 @@ export interface Person {
   email: string;
   criteria: Criteria;
   alert_mode: "immediate" | "hourly" | "daily" | "weekly";
+  /** Matches keep updating but no email is sent. */
+  alerts_paused?: boolean;
 }
 
 /** A posting as normalized from any ATS. */
@@ -39,10 +41,14 @@ export interface Posting {
 /** One board check: its postings and version tag, or "unchanged since that tag". */
 export type BoardResult = { unchanged: true } | { unchanged?: false; postings: Posting[]; etag?: string };
 
+export type Check = "title" | "seniority" | "location" | "pay";
+
 export interface FilterResult {
   pass: boolean;
   /** Why it failed (empty when it passed). */
   reasons: string[];
+  /** Which checks failed, with the reason for each; drives near misses. */
+  failed: { check: Check; detail: string }[];
   /** Soft warnings shown alongside a passing posting. */
   flags: string[];
   /** Which configured area or remote scope matched. */

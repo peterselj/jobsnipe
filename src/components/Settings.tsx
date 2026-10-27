@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { Criteria, Profile } from '../lib/types';
+import { money } from '../../shared/format';
+import type { Criteria, Match, Profile } from '../lib/types';
 import { Button, Field, Input, SectionHeader } from './ui';
 
 // Lists are edited as comma-separated text: easy to read, easy to paste.
@@ -18,10 +19,26 @@ interface Area {
   match: string;
 }
 
-/** Name, alert email, and filters. Saving re-checks so matches reflect the new filters right away. */
-export default function Settings({ profile, onSave, onCancel }: {
+/** Most common places among location near misses, e.g. [["San Francisco, CA", 18], ...]. */
+function missedPlaces(nearMisses: Match[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const m of nearMisses) {
+    if (m.nearMiss !== 'location' || !m.missDetail) continue;
+    for (const place of new Set(m.missDetail.split(';').map((s) => s.trim()).filter(Boolean))) {
+      counts.set(place, (counts.get(place) ?? 0) + 1);
+    }
+  }
+  return [...counts].sort((a, b) => b[1] - a[1]).slice(0, 4);
+}
+
+/** Name, alert email, filters, pausing, and deleting the account. Saving re-checks right away. */
+export default function Settings({ profile, nearMisses, onSave, onPause, onDelete, onCancel }: {
   profile: Profile;
+  /** Roles the current filters hid for one reason; used to show what each filter is costing. */
+  nearMisses: Match[];
   onSave: (patch: Pick<Profile, 'name' | 'email' | 'criteria'>) => Promise<void>;
+  onPause: (paused: boolean) => Promise<void>;
+  onDelete: () => Promise<void>;
   onCancel: () => void;
 }) {
   const c = profile.criteria;
@@ -66,10 +83,29 @@ export default function Settings({ profile, onSave, onCancel }: {
   };
 
   const card = 'rounded-xl border border-line bg-white p-5';
+  const hint = 'mt-3 rounded-md bg-amber-50 px-3 py-2 text-[13px] text-amber-900';
+  const missing = (k: Match['nearMiss']) => nearMisses.filter((m) => m.nearMiss === k);
+  const payMisses = missing('pay');
+  const places = missedPlaces(nearMisses);
+  // What a different pay floor would do, from the roles the current one hides.
+  const wouldAdd = (currency: string, floor?: number) =>
+    floor === undefined ? payMisses.filter((m) => m.comp?.currency === currency).length : payMisses.filter((m) => m.comp?.currency === currency && m.comp.max >= floor).length;
+  const savedFloor = (cur: string) => profile.criteria.comp_floor?.[cur];
+  const payPreview = (cur: string, typed: string) => {
+    const hidden = wouldAdd(cur);
+    if (!hidden) return null;
+    const n = num(typed);
+    if (n !== undefined && n !== savedFloor(cur) && n < (savedFloor(cur) ?? Infinity)) {
+      return `At ${money({ min: n, max: n, currency: cur }).split('–')[0]}, ${wouldAdd(cur, n)} of those would show up.`;
+    }
+    return null;
+  };
   const check = 'h-4 w-4 rounded border-slate-300 accent-[var(--color-forest)]';
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
+      <PauseCard paused={profile.alerts_paused} onPause={onPause} />
+
       <div className={card}>
         <SectionHeader title="You" />
         <div className="grid gap-3 sm:grid-cols-2">
@@ -100,6 +136,9 @@ export default function Settings({ profile, onSave, onCancel }: {
                 <Input inputMode="numeric" value={unlevelledPay} onChange={(e) => setUnlevelledPay(e.target.value)} placeholder="180000" />
               </Field>
             </div>
+          )}
+          {missing('seniority').length > 0 && (
+            <p className={hint}>Senior-and-up is hiding {missing('seniority').length} open role{missing('seniority').length > 1 ? 's' : ''} that otherwise fit. See them under Near misses.</p>
           )}
         </div>
       </div>
@@ -138,6 +177,11 @@ export default function Settings({ profile, onSave, onCancel }: {
               ))}
             </div>
           )}
+          {places.length > 0 && (
+            <p className={hint}>
+              Places hiding the most roles that otherwise fit: {places.map(([p, n]) => `${p} (${n})`).join(' · ')}.
+            </p>
+          )}
         </div>
       </div>
 
@@ -145,16 +189,93 @@ export default function Settings({ profile, onSave, onCancel }: {
         <SectionHeader title="Pay" />
         <p className="mb-3 text-sm text-muted">Hide roles whose listed range tops out below this. Roles with no range listed are kept and flagged.</p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="US dollars"><Input inputMode="numeric" value={floorUsd} onChange={(e) => setFloorUsd(e.target.value)} placeholder="140000" /></Field>
-          <Field label="Canadian dollars"><Input inputMode="numeric" value={floorCad} onChange={(e) => setFloorCad(e.target.value)} placeholder="140000" /></Field>
+          <Field label="US dollars" hint={payPreview('USD', floorUsd)}>
+            <Input inputMode="numeric" value={floorUsd} onChange={(e) => setFloorUsd(e.target.value)} placeholder="140000" />
+          </Field>
+          <Field label="Canadian dollars" hint={payPreview('CAD', floorCad)}>
+            <Input inputMode="numeric" value={floorCad} onChange={(e) => setFloorCad(e.target.value)} placeholder="140000" />
+          </Field>
         </div>
+        {payMisses.length > 0 && (
+          <p className={hint}>
+            Your floor is hiding {payMisses.length} open role{payMisses.length > 1 ? 's' : ''} that otherwise fit (
+            {payMisses.slice(0, 3).map((m) => `${m.company} ${money(m.comp!)}`).join(', ')}
+            {payMisses.length > 3 ? ', …' : ''}). Type a lower number to see how many would show up.
+          </p>
+        )}
       </div>
 
       {error && <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <div className="flex items-center gap-2 pb-8">
+      <div className="flex items-center gap-2">
         <Button variant="primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save and re-check'}</Button>
         <Button variant="ghost" onClick={onCancel} disabled={saving}>Cancel</Button>
       </div>
+
+      <DeleteCard onDelete={onDelete} />
+    </div>
+  );
+}
+
+function PauseCard({ paused, onPause }: { paused: boolean; onPause: (p: boolean) => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await onPause(!paused);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className={`flex flex-wrap items-center gap-3 rounded-xl border p-5 ${paused ? 'border-amber-300 bg-amber-50' : 'border-line bg-white'}`}>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-bold">Email alerts are {paused ? 'paused' : 'on'}</div>
+        <p className="text-sm text-muted">
+          {paused
+            ? "Your inbox here still updates every hour. Nothing found while paused is emailed later."
+            : 'Pause any time, e.g. once you have an offer. Your inbox here keeps updating.'}
+        </p>
+      </div>
+      <Button variant={paused ? 'primary' : 'secondary'} onClick={toggle} disabled={busy}>
+        {paused ? 'Resume alerts' : 'Pause alerts'}
+      </Button>
+    </div>
+  );
+}
+
+function DeleteCard({ onDelete }: { onDelete: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const go = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onDelete();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="mb-8 rounded-xl border border-red-200 bg-white p-5">
+      <div className="text-sm font-bold text-red-700">Delete account</div>
+      <p className="mt-1 text-sm text-muted">
+        Permanently removes your sign-in, settings, companies, matches and Interested / Not for me. This can't be undone.
+      </p>
+      {!open ? (
+        <Button variant="danger" className="mt-3" onClick={() => setOpen(true)}>Delete my account…</Button>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <Input className="max-w-[220px]" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder='Type "delete" to confirm' />
+          <Button variant="danger" disabled={busy || typed.trim().toLowerCase() !== 'delete'} onClick={go}>
+            {busy ? 'Deleting…' : 'Delete everything'}
+          </Button>
+          <Button variant="ghost" disabled={busy} onClick={() => setOpen(false)}>Cancel</Button>
+        </div>
+      )}
+      {error && <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     </div>
   );
 }
