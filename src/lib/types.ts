@@ -23,7 +23,7 @@ export interface Match {
   atsPostedAt?: string;
   firstSeenAt: string;
   /** Set for a near miss: the one check it failed, and why. */
-  nearMiss?: 'seniority' | 'location' | 'pay';
+  nearMiss?: 'seniority' | 'location' | 'pay' | 'age';
   missDetail?: string;
 }
 
@@ -53,9 +53,12 @@ export interface NewWatch {
 }
 
 export interface Verdict {
-  verdict: 'interested' | 'not_for_me';
+  /** Absent when a role was archived straight from the inbox without a decision. */
+  verdict?: 'interested' | 'not_for_me';
   reason?: string;
   at: string;
+  /** Set once you're done with the role; it then lives in the Archive. */
+  archivedAt?: string;
   // Kept so a verdict still reads sensibly after the posting closes.
   company: string;
   title: string;

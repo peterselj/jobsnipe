@@ -166,6 +166,18 @@ describe('database', () => {
     await expect(as(JOSH, `select prune_unwatched_boards()`)).rejects.toThrow(/permission denied/);
   });
 
+  it('archives roles with or without a decision, but never saves a role with neither', async () => {
+    await as(JOSH, `insert into verdicts (profile_id, posting_id, verdict, archived_at) values ('${JOSH}', 'greenhouse:acme:old', null, now())`);
+    await as(JOSH, `insert into verdicts (profile_id, posting_id, verdict) values ('${JOSH}', 'greenhouse:acme:done', 'interested')`);
+    await as(JOSH, `update verdicts set archived_at = now() where posting_id = 'greenhouse:acme:done'`);
+    expect(await as(JOSH, `select posting_id, verdict from verdicts where archived_at is not null order by posting_id`)).toEqual([
+      { posting_id: 'greenhouse:acme:done', verdict: 'interested' },
+      { posting_id: 'greenhouse:acme:old', verdict: null },
+    ]);
+    await expect(as(JOSH, `insert into verdicts (profile_id, posting_id, verdict) values ('${JOSH}', 'greenhouse:acme:x', null)`)).rejects.toThrow(/verdicts_decided_or_archived/);
+    await db.exec(`insert into matches (profile_id, posting_id, near_miss) values ('${JOSH}', 'greenhouse:acme:1', 'age') on conflict do nothing`);
+  });
+
   it('Check now calls GitHub with the Vault key, at most once a minute', async () => {
     await expect(as(JOSH, `select request_check()`)).rejects.toThrow(/github_dispatch_token/);
     await db.exec(`insert into vault.decrypted_secrets values ('github_dispatch_token', 'ghp_test')`);

@@ -3,15 +3,16 @@ import { ago, money } from '../../shared/format';
 import type { Feedback, Match, Verdict } from '../lib/types';
 import { Button } from './ui';
 
-type Folder = 'inbox' | 'interested' | 'not_for_me' | 'near';
+type Folder = 'inbox' | 'interested' | 'not_for_me' | 'near' | 'archive';
 type MissCheck = NonNullable<Match['nearMiss']>;
 
-export const MISS_LABEL: Record<MissCheck, string> = { pay: 'Pay', location: 'Place', seniority: 'Level' };
+export const MISS_LABEL: Record<MissCheck, string> = { pay: 'Pay', location: 'Place', seniority: 'Level', age: 'Age' };
 
 interface Props {
   matches: Match[];
   feedback: Feedback;
-  onVerdict: (m: Match, v: Verdict['verdict'] | null, reason?: string) => void;
+  /** Save a role's new state: a decision, archived, or null (back to the inbox). */
+  onVerdict: (m: Match, entry: Verdict | null) => void;
   /** Shown in the inbox when there's nothing to triage because no filters are set. */
   needsFilters?: boolean;
   onOpenSettings?: () => void;
@@ -20,8 +21,10 @@ interface Props {
 const DAY = 86_400_000;
 
 /**
- * Matches as an inbox: everything not yet decided sits in Inbox until marked Interested or
- * Not for me. Interested keeps roles even after the posting closes (from the saved verdict).
+ * Matches as an inbox: everything not yet decided sits in Inbox until marked Interested or Not for
+ * me, or archived. Done with a role? Archive it; the Archive keeps it (and what you thought of it) for
+ * good, so it never comes back. Decided and archived roles are read from the saved verdicts, so
+ * they stay listed after the posting closes.
  */
 export default function Matches({ matches, feedback, onVerdict, needsFilters, onOpenSettings }: Props) {
   const [folder, setFolder] = useState<Folder>('inbox');
@@ -32,17 +35,17 @@ export default function Matches({ matches, feedback, onVerdict, needsFilters, on
   // Near misses: right job family, missed by one filter. Marking one Interested moves it to Interested.
   const near = matches.filter((m) => m.nearMiss && !feedback[m.id]);
   const missCounts = near.reduce<Partial<Record<MissCheck, number>>>((acc, m) => ({ ...acc, [m.nearMiss!]: (acc[m.nearMiss!] ?? 0) + 1 }), {});
-  // Decided roles come from the verdicts, so they stay listed after the posting closes.
-  const decided = (v: Verdict['verdict']) =>
+  const fromVerdicts = (keep: (f: Verdict) => boolean, newestBy: (f: Verdict) => string) =>
     Object.entries(feedback)
-      .filter(([, f]) => f.verdict === v)
-      .sort(([, a], [, b]) => b.at.localeCompare(a.at))
+      .filter(([, f]) => keep(f))
+      .sort(([, a], [, b]) => newestBy(b).localeCompare(newestBy(a)))
       .map(([id, f]) => open.get(id) ?? { id, company: f.company, title: f.title, url: f.url ?? '', flags: [], firstSeenAt: f.at, closed: true });
   const lists: Record<Folder, (Match & { closed?: boolean })[]> = {
     inbox,
-    interested: decided('interested'),
-    not_for_me: decided('not_for_me'),
+    interested: fromVerdicts((f) => f.verdict === 'interested' && !f.archivedAt, (f) => f.at),
+    not_for_me: fromVerdicts((f) => f.verdict === 'not_for_me' && !f.archivedAt, (f) => f.at),
     near: missFilter ? near.filter((m) => m.nearMiss === missFilter) : near,
+    archive: fromVerdicts((f) => !!f.archivedAt, (f) => f.archivedAt!),
   };
   const shown = lists[folder];
 
@@ -51,6 +54,7 @@ export default function Matches({ matches, feedback, onVerdict, needsFilters, on
     { key: 'interested', label: '★ Interested' },
     { key: 'not_for_me', label: 'Not for me' },
     { key: 'near', label: 'Near misses' },
+    { key: 'archive', label: 'Archive' },
   ];
 
   return (
@@ -82,7 +86,7 @@ export default function Matches({ matches, feedback, onVerdict, needsFilters, on
             {onOpenSettings ? <button className="font-semibold text-forest underline-offset-2 hover:underline" onClick={onOpenSettings}>Settings</button> : 'Settings'}.
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {([null, 'pay', 'location', 'seniority'] as (MissCheck | null)[]).map((k) =>
+            {([null, 'pay', 'location', 'seniority', 'age'] as (MissCheck | null)[]).map((k) =>
               k && !missCounts[k] ? null : (
                 <button
                   key={k ?? 'all'}
@@ -124,7 +128,8 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
     inbox: ['No new roles!', "You're all caught up. JobSnipe checks every hour and emails you when something new fits."],
     interested: ['Nothing starred yet', 'Mark a role ★ Interested and it lands here, even after the posting closes.'],
     not_for_me: ['Nothing dismissed', 'Roles you mark Not for me are kept here, out of your way.'],
-    near: ['No near misses', 'Roles your filters hid for just one reason (pay, place or level) show up here.'],
+    near: ['No near misses', 'Roles your filters hid for just one reason (pay, place, level or age) show up here.'],
+    archive: ['Archive is empty', "Done with a role (applied, moved it to JobBoard, or it's just stale)? Archive it. It stays here and never comes back to your inbox."],
   }[folder];
   return (
     <div className="rounded-xl border border-dashed border-line-strong bg-white/60 px-5 py-10 text-center">
@@ -137,21 +142,31 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
 function MatchCard({ m, verdict, onVerdict }: { m: Match & { closed?: boolean }; verdict?: Verdict; onVerdict: Props['onVerdict'] }) {
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState('');
-  const interested = verdict?.verdict === 'interested';
+  const interested = verdict?.verdict === 'interested' && !verdict.archivedAt;
+  const archived = !!verdict?.archivedAt;
   const isNew = !verdict && !m.nearMiss && Date.now() - Date.parse(m.firstSeenAt) < DAY;
+  const base = { at: new Date().toISOString(), company: m.company, title: m.title, url: m.url || verdict?.url };
+  const decide = (v: 'interested' | 'not_for_me', reason?: string) => onVerdict(m, { ...base, verdict: v, reason });
+  // Archive keeps whatever you'd decided, so the Archive can show it.
+  const archive = () => onVerdict(m, { ...base, ...verdict, archivedAt: new Date().toISOString() });
+  // Restore: back to its folder, or to the inbox if it was archived without a decision.
+  const restore = () => onVerdict(m, verdict?.verdict ? { ...verdict, archivedAt: undefined } : null);
+  const status = archived
+    ? verdict?.verdict === 'interested' ? '★ Was Interested' : verdict?.verdict === 'not_for_me' ? 'Was Not for me' : 'Archived from inbox'
+    : undefined;
   const facts = m.closed
     ? ['Posting closed or no longer matches']
     : [m.where, m.comp && money(m.comp), m.atsPostedAt && `posted ${ago(m.atsPostedAt)}`].filter(Boolean);
 
   const dismiss = () => {
-    onVerdict(m, 'not_for_me', reason.trim() || undefined);
+    decide('not_for_me', reason.trim() || undefined);
     setAsking(false);
     setReason('');
   };
 
   return (
     <article
-      className={`rounded-xl border bg-white px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,.02)] ${interested ? 'border-forest-2 ring-1 ring-forest-2/30' : 'border-line'} ${m.closed ? 'opacity-70' : ''}`}
+      className={`rounded-xl border bg-white px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,.02)] ${interested ? 'border-forest-2 ring-1 ring-forest-2/30' : 'border-line'} ${m.closed || archived ? 'opacity-75' : ''}`}
       style={isNew ? { borderLeft: '3px solid var(--color-forest-2)' } : undefined}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -159,6 +174,7 @@ function MatchCard({ m, verdict, onVerdict }: { m: Match & { closed?: boolean };
           <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.06em] text-muted">
             {m.company}
             {isNew && <span className="rounded bg-emerald-100 px-1.5 py-px text-[9.5px] text-forest">New</span>}
+            {status && <span className="rounded bg-slate-100 px-1.5 py-px text-[9.5px] normal-case tracking-normal text-ink-soft">{status}</span>}
           </div>
           {m.url ? (
             <a href={m.url} target="_blank" rel="noreferrer" className="mt-0.5 block text-[16px] font-bold leading-snug text-forest-2 hover:underline">
@@ -177,15 +193,21 @@ function MatchCard({ m, verdict, onVerdict }: { m: Match & { closed?: boolean };
           {verdict?.reason && <div className="mt-1 text-[13px] text-muted">“{verdict.reason}”</div>}
         </div>
 
-        <div className="flex shrink-0 flex-wrap gap-1.5 sm:justify-end">
-          {verdict ? (
-            <Button size="sm" variant="ghost" onClick={() => onVerdict(m, null)}>↩ Back to inbox</Button>
+        <div className="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
+          {archived ? (
+            <Button size="sm" variant="ghost" onClick={restore}>↩ Restore</Button>
+          ) : verdict ? (
+            <>
+              <Button size="sm" onClick={archive} title="Done with this role: move it to the Archive">Archive →</Button>
+              <Button size="sm" variant="ghost" onClick={() => onVerdict(m, null)}>↩ Back to inbox</Button>
+            </>
           ) : (
             !asking && (
-              <>
-                <Button size="sm" onClick={() => onVerdict(m, 'interested')}>{m.nearMiss ? '★ Interested anyway' : '★ Interested'}</Button>
+              <div className="flex flex-wrap gap-1.5 sm:justify-end">
+                <Button size="sm" onClick={() => decide('interested')}>{m.nearMiss ? '★ Interested anyway' : '★ Interested'}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>Not for me</Button>
-              </>
+                <Button size="sm" variant="ghost" onClick={archive} title="Not worth deciding (e.g. stale): archive it so it never comes back">Archive</Button>
+              </div>
             )
           )}
         </div>

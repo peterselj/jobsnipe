@@ -55,7 +55,7 @@ export interface MatchRow {
   where_label: string | null;
   flags: string[];
   /** Set for near misses: the one check that failed, and why. */
-  near_miss?: "seniority" | "location" | "pay" | null;
+  near_miss?: "seniority" | "location" | "pay" | "age" | null;
   miss_detail?: string | null;
 }
 

@@ -163,7 +163,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         const checkedNow = fetched.has(c.id);
         const results = (open.get(c.id) ?? []).map((p) => {
           const shown = { ...p, company: w.name }; // each person's own name for the company
-          return { p: shown, r: evaluate(shown, filters) };
+          return { p: shown, r: evaluate(shown, filters, now) };
         });
         const passing = results.filter((x) => x.r.pass);
         for (const { p, r } of results) {

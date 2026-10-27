@@ -10,6 +10,7 @@ export interface Filters {
   locations: { name: string; match: string[] }[];
   remote: { allowed: boolean; countries: string[] };
   comp_floor: Record<string, number>;
+  max_age_days?: number;
 }
 
 export interface Person {
@@ -41,7 +42,7 @@ export interface Posting {
 /** One board check: its postings and version tag, or "unchanged since that tag". */
 export type BoardResult = { unchanged: true } | { unchanged?: false; postings: Posting[]; etag?: string };
 
-export type Check = "title" | "seniority" | "location" | "pay";
+export type Check = "title" | "seniority" | "location" | "pay" | "age";
 
 export interface FilterResult {
   pass: boolean;

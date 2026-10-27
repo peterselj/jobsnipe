@@ -14,6 +14,7 @@ export function toFilters(c: Criteria | null | undefined): Filters {
       .filter((l) => l.match.length),
     remote: { allowed: c?.remote?.allowed ?? false, countries: (c?.remote?.countries ?? []).map((x) => x.toUpperCase()) },
     comp_floor: c?.comp_floor ?? {},
+    max_age_days: c?.max_age_days && c.max_age_days > 0 ? c.max_age_days : undefined,
   };
 }
 
@@ -75,7 +76,7 @@ export function locationCheck(post: Posting, f: Filters): { where?: string; flag
 
 const shortMoney = (currency: string, n: number) => `${currency === "CAD" ? "CA$" : currency === "USD" ? "$" : `${currency} `}${Math.round(n / 1000)}K`;
 
-export function evaluate(post: Posting, f: Filters): FilterResult {
+export function evaluate(post: Posting, f: Filters, now: Date = new Date()): FilterResult {
   const failed: FilterResult["failed"] = [];
   const titleFail = titleCheck(post.title, f);
   if (titleFail) failed.push({ check: "title", detail: titleFail });
@@ -84,6 +85,13 @@ export function evaluate(post: Posting, f: Filters): FilterResult {
 
   const loc = locationCheck(post, f);
   if (!loc.where) failed.push({ check: "location", detail: post.locations.join("; ") || "No location listed" });
+
+  // Postings left up for months are usually evergreen listings or forgotten; past the limit they're
+  // out of the inbox (still visible as a near miss).
+  if (f.max_age_days && post.atsPostedAt) {
+    const days = Math.floor((now.getTime() - Date.parse(post.atsPostedAt)) / 86_400_000);
+    if (days > f.max_age_days) failed.push({ check: "age", detail: `Posted ${days} days ago (your limit: ${f.max_age_days})` });
+  }
 
   const flags = [...loc.flags, ...(level.flag ? [level.flag] : [])];
   if (post.comp) {
@@ -107,5 +115,5 @@ export function evaluate(post: Posting, f: Filters): FilterResult {
  */
 export function nearMiss(r: FilterResult): { check: Exclude<FilterResult["failed"][number]["check"], "title">; detail: string } | undefined {
   if (r.failed.length !== 1 || r.failed[0].check === "title") return undefined;
-  return r.failed[0] as { check: "seniority" | "location" | "pay"; detail: string };
+  return r.failed[0] as { check: "seniority" | "location" | "pay" | "age"; detail: string };
 }

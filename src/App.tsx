@@ -102,9 +102,9 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
     }
   };
 
-  const onVerdict = async (m: Match, v: Verdict['verdict'] | null, reason?: string) => {
+  /** Save a role's new state: a decision, archived, or null (back to the inbox). */
+  const onVerdict = async (m: Match, entry: Verdict | null) => {
     if (!snap) return;
-    const entry: Verdict | null = v ? { verdict: v, reason, at: new Date().toISOString(), company: m.company, title: m.title, url: m.url } : null;
     const prev = snap.feedback;
     const next = { ...prev };
     if (entry) next[m.id] = entry;

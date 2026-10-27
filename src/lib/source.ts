@@ -101,7 +101,15 @@ export class SupabaseSource implements DataSource {
 
     const feedback: Feedback = {};
     for (const v of verdicts.data ?? []) {
-      feedback[v.posting_id] = { verdict: v.verdict, reason: v.reason ?? undefined, at: v.created_at, company: v.company ?? '', title: v.title ?? '', url: v.url ?? undefined };
+      feedback[v.posting_id] = {
+        verdict: v.verdict ?? undefined,
+        reason: v.reason ?? undefined,
+        at: v.created_at,
+        archivedAt: v.archived_at ?? undefined,
+        company: v.company ?? '',
+        title: v.title ?? '',
+        url: v.url ?? undefined,
+      };
     }
 
     return {
@@ -121,11 +129,12 @@ export class SupabaseSource implements DataSource {
     const { error } = await this.db.from('verdicts').upsert({
       profile_id: this.userId,
       posting_id: m.id,
-      verdict: v.verdict,
+      verdict: v.verdict ?? null,
       reason: v.reason ?? null,
+      archived_at: v.archivedAt ?? null,
       company: m.company,
       title: m.title,
-      url: m.url,
+      url: m.url || v.url || null,
       created_at: v.at,
     });
     fail('Saving', error);
