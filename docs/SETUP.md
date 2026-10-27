@@ -23,7 +23,7 @@ Never paste the secret ones into chat, code, or an issue.
 1. **Authenticate your domain:** Senders, Domains & Dedicated IPs → **Domains** → Add a domain →
    `joshpetersel.com`. Brevo lists DNS records (a `brevo-code` TXT, DKIM, and DMARC). Add them where
    the domain's DNS is managed, then click **Verify** (DNS can take up to a few hours).
-2. **Add the sender:** Senders → Add a sender → name `JobSnipe`, email `alerts@joshpetersel.com`.
+2. **Add the sender:** Senders → Add a sender → name `JobSnipe`, email `postalservice@joshpetersel.com`.
 3. **API key** (for alert emails): SMTP & API → **API Keys** → Generate. Copy it for step 3.
 4. **SMTP key** (for sign-in emails): SMTP & API → **SMTP** tab. Note the **Login** shown there
    (looks like `abc123@smtp-brevo.com`) and generate an **SMTP key**. Copy both for step 2.
@@ -40,7 +40,7 @@ under validation" message, that review is why.
    - Site URL: `https://peterselj.github.io/jobsnipe/`
    - Redirect URLs: add `https://peterselj.github.io/jobsnipe/**` and `http://localhost:5173/jobsnipe/**`
 3. **Send sign-in emails through Brevo:** Authentication → Emails → **SMTP Settings** → enable custom SMTP:
-   - Sender email `alerts@joshpetersel.com`, sender name `JobSnipe`
+   - Sender email `postalservice@joshpetersel.com`, sender name `JobSnipe`
    - Host `smtp-relay.brevo.com`, port `587`
    - Username: the Brevo SMTP **Login**; password: the Brevo **SMTP key**
 4. **Keys:** Project Settings → **API Keys**. The `sb_publishable_…` key goes in
@@ -51,7 +51,7 @@ under validation" message, that review is why.
 1. Settings → Secrets and variables → Actions → **Secrets** tab:
    - `SUPABASE_SECRET_KEY` = the `sb_secret_…` key
    - `BREVO_API_KEY` = the Brevo API key
-2. Same page, **Variables** tab: `MAIL_FROM` = `alerts@joshpetersel.com`
+2. Same page, **Variables** tab: `MAIL_FROM` = `postalservice@joshpetersel.com`
 3. **Token for the hourly timer:** GitHub → Settings → Developer settings → Fine-grained tokens →
    Generate: name `JobSnipe timer`, expiration 1 year, repository access **Only select repositories →
    jobsnipe**, permissions → Repository → **Actions: Read and write**. Copy it, then in Supabase's
