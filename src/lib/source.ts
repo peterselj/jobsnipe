@@ -1,110 +1,158 @@
-import { GitHub } from './github';
-import type { Feedback, RunStatus, Verdict, WebView } from './types';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Ats, Feedback, Match, NewWatch, Profile, Run, Snapshot, Verdict, Watch } from './types';
 
-/** Everything the page reads and writes. GitHubSource is the real one; DemoSource backs the demo. */
+/** Everything the page reads and writes. SupabaseSource is the real one; DemoSource backs the demo. */
 export interface DataSource {
-  kind: 'github' | 'demo';
-  loadView(): Promise<WebView | null>;
-  loadProfile(): Promise<string>;
-  /** Re-reads the profile file, applies `edit`, and commits the result. */
-  updateProfile(edit: (text: string) => string, message: string): Promise<string>;
-  loadFeedback(): Promise<Feedback>;
-  /** Set or clear (null) one verdict; returns the saved feedback. */
-  setVerdict(postingId: string, v: Verdict | null): Promise<Feedback>;
-  startCheck(): Promise<void>;
-  latestRun(): Promise<RunStatus | null>;
+  kind: 'supabase' | 'demo';
+  load(): Promise<Snapshot>;
+  setVerdict(m: Pick<Match, 'id' | 'company' | 'title' | 'url'>, v: Verdict | null): Promise<void>;
+  addWatch(w: NewWatch): Promise<void>;
+  changeBoard(watchId: number, ats: Ats, board: string): Promise<void>;
+  removeWatch(watchId: number): Promise<void>;
+  saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria'>>): Promise<void>;
+  /** Starts a check; returns the time to wait for a run after. */
+  requestCheck(): Promise<string>;
+  latestRun(): Promise<Run | undefined>;
 }
 
-export interface Connection {
-  token: string;
-  repo: string; // owner/name of the private backend repo
-  profile: string; // profiles/<profile>.yaml
+function fail(what: string, error: { message: string } | null): asserts error is null {
+  if (error) throw new Error(`${what}: ${error.message}`);
 }
 
-const WORKFLOW = 'fast-lane.yml';
-const STATE_BRANCH = 'state';
-const FEEDBACK_BRANCH = 'feedback';
+function status(c: any): Watch['status'] {
+  if (!c) return 'unmonitored';
+  if (!c.last_checked_at) return 'pending';
+  return c.consecutive_failures > 0 ? 'failing' : 'ok';
+}
 
-export class GitHubSource implements DataSource {
-  kind = 'github' as const;
-  private gh: GitHub;
-  private main?: Promise<string>;
-  // One write at a time, so two quick clicks can't race on the same file.
-  private queue: Promise<unknown> = Promise.resolve();
+const toRun = (r: any): Run => ({
+  startedAt: r.started_at,
+  finishedAt: r.finished_at ?? undefined,
+  trigger: r.trigger,
+  errors: Array.isArray(r.errors) ? r.errors.length : 0,
+});
 
-  constructor(private conn: Connection, fetchImpl?: typeof fetch) {
-    this.gh = new GitHub(conn.token, conn.repo, fetchImpl);
-  }
+export class SupabaseSource implements DataSource {
+  kind = 'supabase' as const;
 
-  private serial<T>(fn: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(fn, fn);
-    this.queue = next.catch(() => {});
-    return next;
-  }
+  constructor(private db: SupabaseClient, private userId: string) {}
 
-  /** Cached as a promise so parallel first loads share one request. */
-  private mainBranch(): Promise<string> {
-    this.main ??= this.gh.check();
-    this.main.catch(() => (this.main = undefined));
-    return this.main;
-  }
+  async load(): Promise<Snapshot> {
+    const [profile, watches, matches, verdicts, run] = await Promise.all([
+      this.db.from('profiles').select('id, name, email, criteria, alert_mode').eq('id', this.userId).single(),
+      this.db
+        .from('watches')
+        .select('id, name, careers_url, note, company_id, companies(ats, board, last_checked_at, last_error, consecutive_failures, open_postings)')
+        .order('created_at'),
+      this.db
+        .from('matches')
+        .select('where_label, flags, postings(id, company_id, title, url, ats_posted_at, comp_min, comp_max, comp_currency, first_seen_at)')
+        .limit(1000),
+      this.db.from('verdicts').select('*').limit(5000),
+      this.latestRun(),
+    ]);
+    fail('Loading your profile', profile.error);
+    fail('Loading companies', watches.error);
+    fail('Loading matches', matches.error);
+    fail('Loading feedback', verdicts.error);
 
-  private get profilePath() {
-    return `profiles/${this.conn.profile}.yaml`;
-  }
-
-  private get feedbackPath() {
-    return `feedback/${this.conn.profile}.json`;
-  }
-
-  async loadView(): Promise<WebView | null> {
-    await this.mainBranch();
-    const text = await this.gh.readText(`web/${this.conn.profile}.json`, STATE_BRANCH);
-    return text ? (JSON.parse(text) as WebView) : null;
-  }
-
-  async loadProfile(): Promise<string> {
-    const f = await this.gh.readFile(this.profilePath, await this.mainBranch());
-    if (!f) throw new Error(`No ${this.profilePath} in ${this.conn.repo}.`);
-    return f.text;
-  }
-
-  updateProfile(edit: (text: string) => string, message: string): Promise<string> {
-    return this.serial(async () => {
-      const branch = await this.mainBranch();
-      const f = await this.gh.readFile(this.profilePath, branch);
-      if (!f) throw new Error(`No ${this.profilePath} in ${this.conn.repo}.`);
-      const next = edit(f.text);
-      await this.gh.writeFile(this.profilePath, next, message, branch, f.sha);
-      return next;
+    const nameByCompany = new Map<number, string>();
+    const ws: Watch[] = (watches.data ?? []).map((w: any) => {
+      const c = w.companies;
+      if (w.company_id) nameByCompany.set(w.company_id, w.name);
+      return {
+        id: w.id,
+        name: w.name,
+        ats: c?.ats ?? 'none',
+        board: c?.board,
+        careersUrl: w.careers_url ?? undefined,
+        note: w.note ?? undefined,
+        status: status(c),
+        openPostings: c?.open_postings ?? undefined,
+        lastCheckedAt: c?.last_checked_at ?? undefined,
+        lastError: c?.last_error ?? undefined,
+      };
     });
+
+    const ms: Match[] = (matches.data ?? [])
+      .filter((m: any) => m.postings)
+      .map((m: any) => {
+        const p = m.postings;
+        return {
+          id: p.id,
+          company: nameByCompany.get(p.company_id) ?? '',
+          title: p.title,
+          url: p.url,
+          where: m.where_label ?? undefined,
+          flags: m.flags ?? [],
+          comp: p.comp_min != null && p.comp_max != null ? { min: p.comp_min, max: p.comp_max, currency: p.comp_currency } : undefined,
+          atsPostedAt: p.ats_posted_at ?? undefined,
+          firstSeenAt: p.first_seen_at,
+        };
+      })
+      .sort((a, b) => b.firstSeenAt.localeCompare(a.firstSeenAt) || (b.atsPostedAt ?? '').localeCompare(a.atsPostedAt ?? ''));
+
+    const feedback: Feedback = {};
+    for (const v of verdicts.data ?? []) {
+      feedback[v.posting_id] = { verdict: v.verdict, reason: v.reason ?? undefined, at: v.created_at, company: v.company ?? '', title: v.title ?? '', url: v.url ?? undefined };
+    }
+
+    return { profile: { ...profile.data, criteria: profile.data.criteria ?? {} }, watches: ws, matches: ms, feedback, lastRun: run };
   }
 
-  async loadFeedback(): Promise<Feedback> {
-    const f = await this.gh.readFile(this.feedbackPath, FEEDBACK_BRANCH);
-    return f ? (JSON.parse(f.text) as Feedback) : {};
-  }
-
-  setVerdict(postingId: string, v: Verdict | null): Promise<Feedback> {
-    return this.serial(async () => {
-      if (!(await this.gh.branchExists(FEEDBACK_BRANCH))) {
-        await this.gh.createBranch(FEEDBACK_BRANCH, await this.mainBranch());
-      }
-      const f = await this.gh.readFile(this.feedbackPath, FEEDBACK_BRANCH);
-      const fb: Feedback = f ? JSON.parse(f.text) : {};
-      if (v) fb[postingId] = v;
-      else delete fb[postingId];
-      const label = v ? `${v.verdict === 'interested' ? 'Interested' : 'Not for me'}: ${v.title} at ${v.company}` : `Clear feedback on ${postingId}`;
-      await this.gh.writeFile(this.feedbackPath, JSON.stringify(fb, null, 1) + '\n', label, FEEDBACK_BRANCH, f?.sha);
-      return fb;
+  async setVerdict(m: Pick<Match, 'id' | 'company' | 'title' | 'url'>, v: Verdict | null) {
+    if (!v) {
+      const { error } = await this.db.from('verdicts').delete().eq('posting_id', m.id);
+      return fail('Undoing', error);
+    }
+    const { error } = await this.db.from('verdicts').upsert({
+      profile_id: this.userId,
+      posting_id: m.id,
+      verdict: v.verdict,
+      reason: v.reason ?? null,
+      company: m.company,
+      title: m.title,
+      url: m.url,
+      created_at: v.at,
     });
+    fail('Saving', error);
   }
 
-  async startCheck(): Promise<void> {
-    await this.gh.runWorkflow(WORKFLOW, await this.mainBranch());
+  async addWatch(w: NewWatch) {
+    const { error } = await this.db.rpc('add_watch', {
+      p_name: w.name,
+      p_ats: w.ats === 'none' ? null : w.ats,
+      p_board: w.board ?? null,
+      p_careers_url: w.careers_url ?? null,
+      p_note: w.note ?? null,
+    });
+    fail('Adding company', error);
   }
 
-  latestRun(): Promise<RunStatus | null> {
-    return this.gh.latestRun(WORKFLOW);
+  async changeBoard(watchId: number, ats: Ats, board: string) {
+    const { error } = await this.db.rpc('change_watch_board', { p_watch_id: watchId, p_ats: ats, p_board: board });
+    fail('Changing board', error);
+  }
+
+  async removeWatch(watchId: number) {
+    const { error } = await this.db.from('watches').delete().eq('id', watchId);
+    fail('Removing company', error);
+  }
+
+  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria'>>) {
+    const { error } = await this.db.from('profiles').update(patch).eq('id', this.userId);
+    fail('Saving settings', error);
+  }
+
+  async requestCheck() {
+    const { data, error } = await this.db.rpc('request_check', { p_reason: 'check now' });
+    fail('Starting a check', error);
+    return data as string;
+  }
+
+  async latestRun() {
+    const { data, error } = await this.db.from('runs').select('*').order('started_at', { ascending: false }).limit(1);
+    fail('Loading last check', error);
+    return data?.[0] ? toRun(data[0]) : undefined;
   }
 }

@@ -1,0 +1,38 @@
+name: Check job boards
+
+# Started hourly by Supabase (pg_cron → dispatch_check) and by the page's "Check now".
+# GitHub's own schedule is only a backup: it skipped most runs when it was the main timer.
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why this check is running
+        default: manual
+  schedule:
+    - cron: "47 */3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check boards and send alerts
+        run: npm run check -- --trigger "${{ inputs.reason || 'backup schedule' }}"
+        env:
+          SUPABASE_URL: https://hzeciyeirloyzqkjvvln.supabase.co
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          MAIL_FROM: ${{ vars.MAIL_FROM }}

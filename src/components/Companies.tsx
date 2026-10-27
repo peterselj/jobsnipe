@@ -1,43 +1,31 @@
 import { useState } from 'react';
 import { ATS_LABEL, boardUrl } from '../lib/ats';
 import { ago } from '../lib/format';
-import type { CompanyConfig, CompanyHealth } from '../lib/types';
+import type { Ats, NewWatch, Watch } from '../lib/types';
 import FindBoard from './FindBoard';
 import { Button, SectionHeader } from './ui';
 
 interface Props {
-  /** From the profile file: the list you control. */
-  companies: CompanyConfig[];
-  /** From the last hourly run: how each board is doing. */
-  health: CompanyHealth[];
-  onAdd: (c: CompanyConfig) => Promise<void>;
-  onReplace: (index: number, c: CompanyConfig) => Promise<void>;
-  onRemove: (index: number) => Promise<void>;
+  watches: Watch[];
+  onAdd: (w: NewWatch) => Promise<void>;
+  onChangeBoard: (w: Watch, ats: Ats, board: string) => Promise<void>;
+  onRemove: (w: Watch) => Promise<void>;
 }
 
-type Row = CompanyConfig & { index: number; h?: CompanyHealth };
-
-const STATUS: Record<CompanyHealth['status'], { dot: string; label: string }> = {
+const STATUS: Record<Watch['status'], { dot: string; label: string }> = {
   ok: { dot: 'bg-sage', label: 'Checking hourly' },
   failing: { dot: 'bg-brick', label: 'Board failing' },
-  pending: { dot: 'bg-gold', label: 'Checked on the next run' },
+  pending: { dot: 'bg-gold', label: 'Not checked yet' },
   unmonitored: { dot: 'bg-slate-300', label: 'Not monitored' },
 };
 
-function healthFor(c: CompanyConfig, health: CompanyHealth[]): CompanyHealth | undefined {
-  return c.ats === 'none'
-    ? health.find((h) => h.ats === 'none' && h.name === c.name)
-    : health.find((h) => h.ats === c.ats && h.board?.toLowerCase() === c.board?.toLowerCase());
-}
-
-export default function Companies({ companies, health, onAdd, onReplace, onRemove }: Props) {
-  const [finding, setFinding] = useState<{ mode: 'add' } | { mode: 'fix'; row: Row } | null>(null);
-  const rows: Row[] = companies.map((c, index) => ({ ...c, index, h: healthFor(c, health) }));
-  const failing = rows.filter((r) => r.h?.status === 'failing').length;
+export default function Companies({ watches, onAdd, onChangeBoard, onRemove }: Props) {
+  const [finding, setFinding] = useState<{ mode: 'add' } | { mode: 'fix'; w: Watch } | null>(null);
+  const failing = watches.filter((w) => w.status === 'failing').length;
 
   return (
     <section>
-      <SectionHeader title={<>Companies <span className="ml-1 font-mono text-[10px] text-muted">{rows.length}</span></>}>
+      <SectionHeader title={<>Companies <span className="ml-1 font-mono text-[10px] text-muted">{watches.length}</span></>}>
         <Button size="sm" variant="primary" onClick={() => setFinding({ mode: 'add' })}>+ Add company</Button>
       </SectionHeader>
       {failing > 0 && (
@@ -46,20 +34,21 @@ export default function Companies({ companies, health, onAdd, onReplace, onRemov
         </p>
       )}
       <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-white">
-        {rows.map((r) => (
-          <CompanyRow key={`${r.ats}:${r.board ?? r.name}`} r={r} onFix={() => setFinding({ mode: 'fix', row: r })} onRemove={() => onRemove(r.index)} />
+        {watches.map((w) => (
+          <CompanyRow key={w.id} w={w} onFix={() => setFinding({ mode: 'fix', w })} onRemove={() => onRemove(w)} />
         ))}
-        {rows.length === 0 && <li className="px-4 py-6 text-center text-sm text-muted">No companies yet. Add your first target.</li>}
+        {watches.length === 0 && <li className="px-4 py-6 text-center text-sm text-muted">No companies yet. Add the places you'd most like to work.</li>}
       </ul>
 
       {finding && (
         <FindBoard
-          title={finding.mode === 'add' ? 'Add a company' : `Change board for ${finding.row.name}`}
-          initialName={finding.mode === 'fix' ? finding.row.name : ''}
+          title={finding.mode === 'add' ? 'Add a company' : `Change board for ${finding.w.name}`}
+          initialName={finding.mode === 'fix' ? finding.w.name : ''}
+          allowUnmonitored={finding.mode === 'add'}
           onClose={() => setFinding(null)}
           onPick={async (c) => {
             if (finding.mode === 'add') await onAdd(c);
-            else await onReplace(finding.row.index, c);
+            else if (c.ats !== 'none' && c.board) await onChangeBoard(finding.w, c.ats, c.board);
             setFinding(null);
           }}
         />
@@ -68,20 +57,19 @@ export default function Companies({ companies, health, onAdd, onReplace, onRemov
   );
 }
 
-function CompanyRow({ r, onFix, onRemove }: { r: Row; onFix: () => void; onRemove: () => void }) {
+function CompanyRow({ w, onFix, onRemove }: { w: Watch; onFix: () => void; onRemove: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
-  const status = r.ats === 'none' ? 'unmonitored' : (r.h?.status ?? 'pending');
-  const s = STATUS[status];
-  const link = r.ats !== 'none' && r.board ? boardUrl(r.ats, r.board) : r.careers_url;
+  const s = STATUS[w.status];
+  const link = w.ats !== 'none' && w.board ? boardUrl(w.ats, w.board) : w.careersUrl;
   const detail =
     // "HTTP 404 from https://boards-api…/jobs" -> "HTTP 404"; the board link is already on the row.
-    status === 'failing' ? r.h?.lastError?.replace(/\s+(from|for)\s+https?:\/\/\S+/g, '')
-    : status === 'unmonitored' ? r.note ?? 'No job board JobSnipe can read'
-    : status === 'pending' ? 'Not checked yet'
-    : `${r.h?.openPostings ?? 0} open · checked ${ago(r.h?.lastCheckedAt)}`;
+    w.status === 'failing' ? w.lastError?.replace(/\s+(from|for)\s+https?:\/\/\S+/g, '')
+    : w.status === 'unmonitored' ? w.note ?? 'No job board JobSnipe can read'
+    : w.status === 'pending' ? 'Checking soon'
+    : `${w.openPostings ?? 0} open · checked ${ago(w.lastCheckedAt)}`;
 
   const remove = async () => {
-    if (!confirm(`Stop watching ${r.name}?`)) return;
+    if (!confirm(`Stop watching ${w.name}?`)) return;
     setBusy(true);
     try {
       await onRemove();
@@ -95,18 +83,18 @@ function CompanyRow({ r, onFix, onRemove }: { r: Row; onFix: () => void; onRemov
       <span title={s.label} className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-sm font-semibold">{r.name}</span>
+          <span className="text-sm font-semibold">{w.name}</span>
           {link && (
             <a href={link} target="_blank" rel="noreferrer" className="truncate font-mono text-[11px] text-muted hover:text-forest hover:underline">
-              {r.ats === 'none' ? 'careers page' : `${ATS_LABEL[r.ats]} · ${r.board}`}
+              {w.ats === 'none' ? 'careers page' : `${ATS_LABEL[w.ats]} · ${w.board}`}
             </a>
           )}
         </div>
-        <div className={`mt-0.5 text-xs ${status === 'failing' ? 'text-red-700' : 'text-muted'}`}>{detail}</div>
+        <div className={`mt-0.5 text-xs ${w.status === 'failing' ? 'text-red-700' : 'text-muted'}`}>{detail}</div>
       </div>
       <div className="flex shrink-0 gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-        <Button size="sm" variant="ghost" onClick={onFix} disabled={busy}>{r.ats === 'none' ? 'Find board' : 'Change board'}</Button>
-        <Button size="sm" variant="ghost" onClick={remove} disabled={busy} aria-label={`Remove ${r.name}`}>✕</Button>
+        <Button size="sm" variant="ghost" onClick={onFix} disabled={busy}>{w.ats === 'none' ? 'Find board' : 'Change board'}</Button>
+        <Button size="sm" variant="ghost" onClick={remove} disabled={busy} aria-label={`Remove ${w.name}`}>✕</Button>
       </div>
     </li>
   );

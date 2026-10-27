@@ -3,40 +3,49 @@
 **https://peterselj.github.io/jobsnipe/** · [try the demo](https://peterselj.github.io/jobsnipe/?demo)
 
 JobSnipe checks your target companies' job boards every hour and emails you the moment a role
-that fits is posted, so you can be one of the first applicants. This repo is the web page; the
-hourly checker, your profile, and your data live in a separate private repo.
+that fits is posted, so you can be one of the first applicants. Sign in with just your email.
 
-## What the page does
+## What it does
 
-- **Matches:** roles at your companies that pass your filters right now, with what's new since your
-  last visit at the top. Mark each **Interested** or **Not for me** (with an optional reason); the
-  feedback is saved to your repo to tune scoring later.
-- **Companies:** every company you watch, which job board it posts on, and whether that board is
-  healthy. Add a company by name or by pasting any of its job links (the page searches Greenhouse,
-  Lever, and Ashby directly), change a company's board, or remove it.
-- **Check now:** runs the hourly check immediately instead of waiting.
+- **Inbox:** open roles at your companies that pass your filters. Mark each **★ Interested** or
+  **Not for me** (with an optional reason) until the inbox reads "No new roles!". Interested roles
+  stay listed even after the posting closes.
+- **Companies:** add one by name or by pasting any of its job links (it searches Greenhouse, Lever
+  and Ashby), fix or remove it, and see whether each board is being read OK.
+- **Settings:** job titles to include and exclude, senior-and-up, places, remote countries, pay floor.
+- **Alerts:** one email per new match, a "now watching" summary when you add a company, and a
+  warning if a company's board stops working.
 
-## How it connects
+## How it's built
 
-There is no JobSnipe server. The page talks to two things straight from your browser:
+```
+ page (GitHub Pages) ──sign-in, read/write own data──▶ Supabase (Postgres + Auth)
+                                                          │  hourly pg_cron, or "Check now"
+                                                          ▼
+                       GitHub Action "Check job boards" (checker/) ──▶ Greenhouse / Lever / Ashby
+                                                          │
+                                                          └──▶ Brevo ──▶ alert emails
+```
 
-- **Your private backend repo on GitHub**, using a fine-grained access key you paste once (it stays
-  in your browser). It reads `web/<profile>.json` from the `state` branch, edits
-  `profiles/<profile>.yaml` on `main`, writes `feedback/<profile>.json` to the `feedback` branch,
-  and starts the `fast-lane.yml` workflow.
-- **Public job-board APIs** (Greenhouse, Lever, Ashby) to find a company's board.
+- `src/`: the page (Vite, React, TypeScript, Tailwind; look adapted from
+  [JobBoard](https://github.com/peterselj/JobBoard)).
+- `checker/`: reads boards, applies each person's filters, saves postings and matches, sends email.
+- `supabase/migrations/`: the database: tables, row-level security (each person sees only their own
+  data), the hourly timer and the Check now path.
+- [`docs/SETUP.md`](docs/SETUP.md): one-time setup of Supabase, Brevo and GitHub.
+- [`PLAN.md`](PLAN.md): what's done and what's next.
 
-The key needs, for the backend repo only: **Contents** read and write, **Actions** read and write.
+No personal search details live in this repo; they're in the database.
 
 ## Development
 
 ```
 npm install
-npm run dev      # http://localhost:5173/jobsnipe/  (add ?demo for sample data)
-npm test
+npm run dev        # http://localhost:5173/jobsnipe/  (add ?demo for sample data)
+npm test           # page, checker, and database tests (the database runs in-process via PGlite)
 npm run build
+npm run check -- --dry-run   # run the checker against Supabase, writing emails to out/ instead of sending
 ```
 
-Pushes to `main` publish to GitHub Pages. Stack: Vite, React, TypeScript, Tailwind CSS. The look
-is JobBoard's (`src/index.css` and `src/components/ui.tsx` are adapted from
-[JobBoard](https://github.com/peterselj/JobBoard)).
+Pushes to `main` publish the page. The checker needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (and
+`BREVO_API_KEY` + `MAIL_FROM` to send).
