@@ -139,6 +139,33 @@ describe('database', () => {
     expect((await db.query(`select has_function_privilege('service_role', 'public.sync_matches(uuid, jsonb)', 'execute') as ok`)).rows).toEqual([{ ok: true }]);
   });
 
+  it('lets people pause alerts and set per-company filters on their own watches only', async () => {
+    await as(JOSH, `update profiles set alerts_paused = true`);
+    expect((await db.query(`select alerts_paused from profiles where id = '${JOSH}'`)).rows).toEqual([{ alerts_paused: true }]);
+    const filters = JSON.stringify({ locations: [{ name: 'Toronto area', match: ['toronto'] }] });
+    await as(JOSH, `update watches set filters = '${filters}' where name = 'Acme'`);
+    expect(await as(JOSH, `select filters->'locations'->0->>'name' as place from watches where name = 'Acme'`)).toEqual([{ place: 'Toronto area' }]);
+    await as(JAKE, `update watches set filters = '{}' where profile_id = '${JOSH}'`); // matches nothing
+    expect(await as(JOSH, `select filters is not null as set from watches where name = 'Acme'`)).toEqual([{ set: true }]);
+    await expect(as(JOSH, `update watches set company_id = null`)).rejects.toThrow(/permission denied/);
+  });
+
+  it('delete_my_account removes the person and everything about them, and boards nobody watches', async () => {
+    const LEAVER = '00000000-0000-0000-0000-00000000000d';
+    await db.exec(`insert into auth.users values ('${LEAVER}', 'leaver@example.com')`);
+    await as(LEAVER, `select add_watch('Only Mine', 'lever', 'onlymine')`);
+    await as(LEAVER, `select add_watch('Acme', 'greenhouse', 'acme')`);
+    await as(LEAVER, `insert into verdicts (profile_id, posting_id, verdict) values ('${LEAVER}', 'greenhouse:acme:1', 'interested')`);
+    await as(LEAVER, `select delete_my_account()`);
+    const left = (await db.query<{ n: number }>(`select
+      (select count(*) from auth.users where id = '${LEAVER}') + (select count(*) from profiles where id = '${LEAVER}')
+      + (select count(*) from watches where profile_id = '${LEAVER}') + (select count(*) from verdicts where profile_id = '${LEAVER}') as n`)).rows[0].n;
+    expect(Number(left)).toBe(0);
+    expect((await db.query(`select board from companies order by board`)).rows).toEqual([{ board: 'acme' }, { board: 'cornerstore' }]);
+    await expect(as(null, `select delete_my_account()`)).rejects.toThrow(/permission denied/);
+    await expect(as(JOSH, `select prune_unwatched_boards()`)).rejects.toThrow(/permission denied/);
+  });
+
   it('Check now calls GitHub with the Vault key, at most once a minute', async () => {
     await expect(as(JOSH, `select request_check()`)).rejects.toThrow(/github_dispatch_token/);
     await db.exec(`insert into vault.decrypted_secrets values ('github_dispatch_token', 'ghp_test')`);

@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { Ats, Person, Posting } from "./types.js";
+import type { Ats, Person, Posting, WatchFilters } from "./types.js";
 
 export interface CompanyRow {
   id: number;
@@ -23,6 +23,7 @@ export interface WatchRow {
   careers_url: string | null;
   note: string | null;
   baselined_at: string | null;
+  filters?: WatchFilters | null;
 }
 
 export interface StoredPosting extends Posting {
@@ -53,6 +54,9 @@ export interface MatchRow {
   posting_id: string;
   where_label: string | null;
   flags: string[];
+  /** Set for near misses: the one check that failed, and why. */
+  near_miss?: "seniority" | "location" | "pay" | null;
+  miss_detail?: string | null;
 }
 
 export interface RunSummary {
@@ -141,12 +145,12 @@ export class SupabaseStore implements Store {
   }
 
   async people() {
-    return this.all<Person>("load profiles", (a, b) => this.db.from("profiles").select("id, name, email, criteria, alert_mode").order("id").range(a, b));
+    return this.all<Person>("load profiles", (a, b) => this.db.from("profiles").select("id, name, email, criteria, alert_mode, alerts_paused").order("id").range(a, b));
   }
 
   async watches() {
     return this.all<WatchRow>("load watches", (a, b) =>
-      this.db.from("watches").select("id, profile_id, company_id, name, careers_url, note, baselined_at").order("id").range(a, b),
+      this.db.from("watches").select("id, profile_id, company_id, name, careers_url, note, baselined_at, filters").order("id").range(a, b),
     );
   }
 
@@ -232,5 +236,6 @@ export class SupabaseStore implements Store {
     this.check(await this.db.from("alerts").delete().lt("sent_at", before(90)), "prune alerts");
     this.check(await this.db.from("runs").delete().lt("started_at", before(30)), "prune runs");
     this.check(await this.db.from("check_requests").delete().lt("requested_at", before(7)), "prune requests");
+    this.check(await this.db.rpc("prune_unwatched_boards"), "prune unwatched boards");
   }
 }

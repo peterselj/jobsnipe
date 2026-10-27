@@ -35,6 +35,25 @@ Work items:
    for filters and alert email; adding a company runs a real check immediately.
 4. Move Josh's current profile and companies into the database; archive `JobSnipe-backend`.
 
+## Near misses: where they can go
+
+A near miss is a role in your job family (title fits) that failed exactly **one** other check: pay,
+place or level. Two or more misses is noise; title misses are the wrong job. They're never emailed.
+
+Places they can surface, and what's built:
+
+1. **A Near misses tab** next to Inbox / Interested / Not for me, with chips per reason (Pay · Place ·
+   Level) and "★ Interested anyway". *Built.*
+2. **Next to each filter in Settings**, as the cost of that filter: "Your floor is hiding 3 roles (…)",
+   "Places hiding the most roles: San Francisco (18)", "Senior-and-up is hiding 2". *Built.*
+3. **What-if previews while editing:** type a lower pay floor and see "At $130K, 2 of those would show
+   up". *Built for pay.* Places could do the same ("Adding San Francisco would add 18").
+4. **A line in a weekly email:** "Your pay floor hid 2 roles this week." Fits with alert batching.
+5. **Learning from verdicts:** if you keep marking pay near misses Interested, suggest lowering the
+   floor (pairs with the Phase 5 rubric-revision idea).
+6. **Per company:** a company's near misses can suggest a per-company filter ("Anthropic: 12 NYC near
+   misses, 0 Toronto").
+
 ## Next
 
 - **Scoring (rest of Phase 2).** AI rubric: tier, fit reason, flags, open questions. Each cue is a
@@ -42,6 +61,9 @@ Work items:
 - **Alert batching.** Immediate / hourly / daily / weekly, once immediate gets noisy.
 - **Slow lane (Phase 3).** Re-screen LinkedIn job-alert emails with your own filters; one or two
   aggregators; Teamtailor and other boards the checker can't read yet; de-duplication.
+- **Built (Oct 27):** pause alerts, delete account, per-company filters (e.g. "Toronto only at this
+  company", "skip titles with technical here"), near misses (above), and leaner hourly checks
+  (unchanged boards cost almost nothing; only changes are written).
 - **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
   proposals from feedback; "Send to JobBoard".
 - **Text alerts** for people who prefer them (ntfy or Twilio).

@@ -1,12 +1,17 @@
 import { useState } from 'react';
 import { ATS_LABEL, boardUrl } from '../lib/ats';
 import { ago } from '../../shared/format';
-import type { Ats, NewWatch, Watch } from '../lib/types';
+import { describeWatchFilters } from '../../shared/criteria';
+import type { Ats, Criteria, NewWatch, Watch, WatchFilters } from '../lib/types';
+import CompanyFilters from './CompanyFilters';
 import FindBoard from './FindBoard';
 import { Button, SectionHeader } from './ui';
 
 interface Props {
   watches: Watch[];
+  /** The person's usual filters, to offer their places as per-company choices. */
+  criteria: Criteria;
+  onSetFilters: (w: Watch, filters: WatchFilters | null) => Promise<void>;
   onAdd: (w: NewWatch) => Promise<void>;
   onChangeBoard: (w: Watch, ats: Ats, board: string) => Promise<void>;
   onRemove: (w: Watch) => Promise<void>;
@@ -19,8 +24,9 @@ const STATUS: Record<Watch['status'], { dot: string; label: string }> = {
   unmonitored: { dot: 'bg-slate-300', label: 'Not monitored' },
 };
 
-export default function Companies({ watches, onAdd, onChangeBoard, onRemove }: Props) {
+export default function Companies({ watches, criteria, onSetFilters, onAdd, onChangeBoard, onRemove }: Props) {
   const [finding, setFinding] = useState<{ mode: 'add' } | { mode: 'fix'; w: Watch } | null>(null);
+  const [tuning, setTuning] = useState<Watch | null>(null);
   const failing = watches.filter((w) => w.status === 'failing').length;
 
   return (
@@ -35,10 +41,22 @@ export default function Companies({ watches, onAdd, onChangeBoard, onRemove }: P
       )}
       <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line bg-white">
         {watches.map((w) => (
-          <CompanyRow key={w.id} w={w} onFix={() => setFinding({ mode: 'fix', w })} onRemove={() => onRemove(w)} />
+          <CompanyRow key={w.id} w={w} onFix={() => setFinding({ mode: 'fix', w })} onTune={() => setTuning(w)} onRemove={() => onRemove(w)} />
         ))}
         {watches.length === 0 && <li className="px-4 py-6 text-center text-sm text-muted">No companies yet. Add the places you'd most like to work.</li>}
       </ul>
+
+      {tuning && (
+        <CompanyFilters
+          watch={tuning}
+          criteria={criteria}
+          onClose={() => setTuning(null)}
+          onSave={async (f) => {
+            await onSetFilters(tuning, f);
+            setTuning(null);
+          }}
+        />
+      )}
 
       {finding && (
         <FindBoard
@@ -57,7 +75,7 @@ export default function Companies({ watches, onAdd, onChangeBoard, onRemove }: P
   );
 }
 
-function CompanyRow({ w, onFix, onRemove }: { w: Watch; onFix: () => void; onRemove: () => Promise<void> }) {
+function CompanyRow({ w, onFix, onTune, onRemove }: { w: Watch; onFix: () => void; onTune: () => void; onRemove: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const s = STATUS[w.status];
   const link = w.ats !== 'none' && w.board ? boardUrl(w.ats, w.board) : w.careersUrl;
@@ -79,7 +97,7 @@ function CompanyRow({ w, onFix, onRemove }: { w: Watch; onFix: () => void; onRem
   };
 
   return (
-    <li className="group flex items-start gap-3 px-4 py-2.5">
+    <li className="group relative flex items-start gap-3 px-4 py-2.5">
       <span title={s.label} className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
@@ -91,8 +109,15 @@ function CompanyRow({ w, onFix, onRemove }: { w: Watch; onFix: () => void; onRem
           )}
         </div>
         <div className={`mt-0.5 text-xs ${w.status === 'failing' ? 'text-red-700' : 'text-muted'}`}>{detail}</div>
+        {describeWatchFilters(w.filters) && (
+          <button onClick={onTune} className="mt-1 inline-flex rounded-full bg-amber-50 px-2 py-px text-[11px] font-medium text-amber-800 hover:bg-amber-100">
+            ⚙ {describeWatchFilters(w.filters)}
+          </button>
+        )}
       </div>
-      <div className="flex shrink-0 gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+      {/* On wide screens the actions float over the row on hover, so names and details get the full width. */}
+      <div className="flex shrink-0 gap-1 rounded-md bg-white opacity-100 transition-opacity sm:absolute sm:right-2 sm:top-2 sm:opacity-0 sm:shadow-sm sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+        {w.ats !== 'none' && <Button size="sm" variant="ghost" onClick={onTune} disabled={busy}>Filters</Button>}
         <Button size="sm" variant="ghost" onClick={onFix} disabled={busy}>{w.ats === 'none' ? 'Find board' : 'Change board'}</Button>
         <Button size="sm" variant="ghost" onClick={remove} disabled={busy} aria-label={`Remove ${w.name}`}>✕</Button>
       </div>

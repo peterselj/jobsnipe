@@ -12,6 +12,7 @@ const PROFILE: Profile = {
   name: 'Demo',
   email: 'demo@example.com',
   alert_mode: 'immediate',
+  alerts_paused: false,
   criteria: {
     titles: { include: ['product manager', 'head of product'], exclude: ['product marketing', 'intern'] },
     seniority: { require: ['senior', 'staff', 'principal', 'lead', 'group', 'director', 'head'], unlevelled_pay_min: 180000 },
@@ -26,12 +27,15 @@ const MATCHES: Match[] = [
   { id: 'd2', company: 'Fieldline Robotics', title: 'Lead Product Manager, Fleet Platform', url: 'https://example.com/jobs/2', where: 'Toronto area', flags: [], comp: { min: 165000, max: 220000, currency: 'CAD' }, atsPostedAt: iso(20), firstSeenAt: iso(19) },
   { id: 'd3', company: 'Brightpath', title: 'Staff Product Manager, Growth', url: 'https://example.com/jobs/3', where: 'Remote (US)', flags: ['no pay range listed'], atsPostedAt: iso(70), firstSeenAt: iso(69) },
   { id: 'd4', company: 'Halcyon AI', title: 'Product Manager, Developer Platform', url: 'https://example.com/jobs/4', where: 'NYC area', flags: ['no level in title; pay suggests senior'], comp: { min: 240000, max: 300000, currency: 'USD' }, atsPostedAt: iso(150), firstSeenAt: iso(140) },
+  { id: 'd6', company: 'Halcyon AI', title: 'Senior Product Manager, Payments', url: 'https://example.com/jobs/6', where: 'NYC area', flags: [], comp: { min: 110000, max: 135000, currency: 'USD' }, atsPostedAt: iso(30), firstSeenAt: iso(29), nearMiss: 'pay', missDetail: 'Pay tops out at $135K (your floor: $140K)' },
+  { id: 'd7', company: 'Northwind Media', title: 'Staff Product Manager, Search', url: 'https://example.com/jobs/7', flags: [], comp: { min: 220000, max: 260000, currency: 'USD' }, atsPostedAt: iso(50), firstSeenAt: iso(49), nearMiss: 'location', missDetail: 'San Francisco, CA' },
+  { id: 'd8', company: 'Brightpath', title: 'Product Manager, Onboarding', url: 'https://example.com/jobs/8', where: 'Remote (US)', flags: [], comp: { min: 130000, max: 150000, currency: 'USD' }, atsPostedAt: iso(80), firstSeenAt: iso(79), nearMiss: 'seniority', missDetail: 'No senior level in the title' },
   { id: 'd5', company: 'Northwind Media', title: 'Group Product Manager, Ads', url: 'https://example.com/jobs/5', where: 'Remote (scope unclear)', flags: ["remote, but the allowed countries aren't stated"], comp: { min: 210000, max: 250000, currency: 'USD' }, atsPostedAt: iso(400), firstSeenAt: iso(390) },
 ];
 
 const WATCHES: Watch[] = [
   { id: 1, name: 'Northwind Media', ats: 'greenhouse', board: 'northwind', status: 'ok', openPostings: 84, lastCheckedAt: iso(0.4) },
-  { id: 2, name: 'Fieldline Robotics', ats: 'lever', board: 'fieldline', status: 'ok', openPostings: 31, lastCheckedAt: iso(0.4) },
+  { id: 2, name: 'Fieldline Robotics', ats: 'lever', board: 'fieldline', status: 'ok', openPostings: 31, lastCheckedAt: iso(0.4), filters: { locations: [{ name: 'Toronto area', match: ['toronto', 'ontario'] }], remote: { allowed: false } } },
   { id: 3, name: 'Brightpath', ats: 'ashby', board: 'brightpath', status: 'ok', openPostings: 22, lastCheckedAt: iso(0.4) },
   { id: 4, name: 'Halcyon AI', ats: 'ashby', board: 'halcyon', status: 'failing', openPostings: 57, lastCheckedAt: iso(0.4), lastError: 'HTTP 404 from the job board' },
   { id: 5, name: 'Corner Store Co', ats: 'none', note: 'posts on its own site; no feed found yet', status: 'unmonitored' },
@@ -74,8 +78,16 @@ export class DemoSource implements DataSource {
     this.watches = this.watches.filter((w) => w.id !== id);
   }
 
+  async setWatchFilters(id: number, filters: Watch['filters'] | null) {
+    this.watches.find((w) => w.id === id)!.filters = filters ?? undefined;
+  }
+
   async saveProfile(patch: Partial<Profile>) {
     Object.assign(this.profile, patch);
+  }
+
+  async deleteAccount() {
+    throw new Error("The demo can't be deleted. Sign up to try it for real.");
   }
 
   /** Really reads any newly added boards (job boards allow browser requests), so the demo feels real. */
