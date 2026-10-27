@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 // Runs the real migration on Postgres (PGlite) with small stand-ins for the Supabase parts it uses:
@@ -26,7 +26,11 @@ const SUPABASE_STUBS = `
     $$ insert into cron.jobs values (n, s, c); select 1::bigint $$;
 `;
 
-const migration = readFileSync('supabase/migrations/0001_init.sql', 'utf8').replace(/^create extension.*$/gm, '');
+// Every migration, in order, as Supabase would have them applied.
+const migrations = readdirSync('supabase/migrations')
+  .filter((f) => f.endsWith('.sql'))
+  .sort()
+  .map((f) => readFileSync(`supabase/migrations/${f}`, 'utf8').replace(/^create extension.*$/gm, ''));
 
 const JOSH = '00000000-0000-0000-0000-00000000000a';
 const JAKE = '00000000-0000-0000-0000-00000000000b';
@@ -45,7 +49,7 @@ async function as<T = Record<string, unknown>>(who: string | null, sql: string, 
 beforeAll(async () => {
   db = new PGlite();
   await db.exec(SUPABASE_STUBS);
-  await db.exec(migration);
+  for (const m of migrations) await db.exec(m);
   await db.exec(`insert into auth.users values ('${JOSH}', 'josh@example.com'), ('${JAKE}', 'jake@example.com')`);
 }, 30_000);
 
@@ -107,6 +111,19 @@ describe('database', () => {
     await expect(as(JAKE, `insert into verdicts (profile_id, posting_id, verdict) values ('${JOSH}', 'greenhouse:acme:1', 'interested')`)).rejects.toThrow(/row-level security/);
     expect(await as(JAKE, 'select * from verdicts')).toEqual([]);
     await expect(as(JOSH, `insert into matches (profile_id, posting_id) values ('${JOSH}', 'greenhouse:acme:1')`)).rejects.toThrow(/row-level security/);
+  });
+
+  it("never shows anyone else's target companies or their postings", async () => {
+    const STRANGER = '00000000-0000-0000-0000-00000000000c';
+    await db.exec(`insert into auth.users values ('${STRANGER}', 'stranger@example.com')`);
+    // Josh alone watches the Corner Store board (ashby/cornerstore); Jake and Josh both watch Acme.
+    await db.exec(`insert into postings (id, company_id, title, url) select 'ashby:cornerstore:1', id, 'Head of Product', 'https://y' from companies where board = 'cornerstore'`);
+    expect(await as(STRANGER, 'select * from companies')).toEqual([]);
+    expect(await as(STRANGER, 'select * from postings')).toEqual([]);
+    expect(await as(JAKE, 'select board from companies')).toEqual([{ board: 'acme' }]);
+    expect(await as(JAKE, `select id from postings where id like 'ashby:%'`)).toEqual([]);
+    expect(await as(JOSH, 'select board from companies order by board')).toEqual([{ board: 'acme' }, { board: 'cornerstore' }]);
+    expect(await as(JOSH, `select title from postings where id = 'ashby:cornerstore:1'`)).toEqual([{ title: 'Head of Product' }]);
   });
 
   it('Check now calls GitHub with the Vault key, at most once a minute', async () => {
