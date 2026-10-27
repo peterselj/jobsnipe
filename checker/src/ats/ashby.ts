@@ -1,6 +1,6 @@
-import type { Posting } from "../types.js";
+import type { BoardResult, Posting } from "../types.js";
 import { parseCompText } from "../normalize.js";
-import { getJson } from "./http.js";
+import { getJsonIfChanged } from "./http.js";
 
 interface AshbyLocation {
   location?: string;
@@ -54,9 +54,10 @@ function compOf(j: AshbyJob): Posting["comp"] {
   return comp ?? parseCompText(j.compensation?.scrapeableCompensationSalarySummary ?? "");
 }
 
-export async function fetchAshby(board: string, company: string): Promise<Posting[]> {
-  const data = await getJson<{ jobs: AshbyJob[] }>(ashbyApi(board));
-  return data.jobs
+export async function fetchAshby(board: string, company: string, etag?: string): Promise<BoardResult> {
+  const res = await getJsonIfChanged<{ jobs: AshbyJob[] }>(ashbyApi(board), etag);
+  if (res.unchanged) return { unchanged: true };
+  const postings = res.data!.jobs
     .filter((j) => j.isListed !== false)
     .map((j) => {
       const wt = j.workplaceType?.toLowerCase();
@@ -71,6 +72,8 @@ export async function fetchAshby(board: string, company: string): Promise<Postin
         url: j.jobUrl,
         atsPostedAt: j.publishedAt,
         comp: compOf(j),
+        compChecked: true,
       } satisfies Posting;
     });
+  return { postings, etag: res.etag };
 }

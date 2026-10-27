@@ -1,6 +1,6 @@
-import type { Posting } from "../types.js";
+import type { BoardResult, Posting } from "../types.js";
 import { parseCompText } from "../normalize.js";
-import { getJson } from "./http.js";
+import { getJsonIfChanged } from "./http.js";
 
 interface LeverJob {
   id: string;
@@ -18,9 +18,10 @@ interface LeverJob {
 export const leverApi = (board: string) =>
   `https://api.lever.co/v0/postings/${encodeURIComponent(board)}?mode=json`;
 
-export async function fetchLever(board: string, company: string): Promise<Posting[]> {
-  const jobs = await getJson<LeverJob[]>(leverApi(board));
-  return jobs.map((j) => {
+export async function fetchLever(board: string, company: string, etag?: string): Promise<BoardResult> {
+  const res = await getJsonIfChanged<LeverJob[]>(leverApi(board), etag);
+  if (res.unchanged) return { unchanged: true };
+  const postings = res.data!.map((j) => {
     const locs = j.categories?.allLocations?.length
       ? j.categories.allLocations
       : [j.categories?.location ?? ""];
@@ -42,6 +43,8 @@ export async function fetchLever(board: string, company: string): Promise<Postin
       url: j.hostedUrl,
       atsPostedAt: j.createdAt ? new Date(j.createdAt).toISOString() : undefined,
       comp,
+      compChecked: true,
     } satisfies Posting;
   });
+  return { postings, etag: res.etag };
 }

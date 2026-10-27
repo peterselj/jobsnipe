@@ -32,7 +32,12 @@ export interface Posting {
   url: string;
   atsPostedAt?: string;
   comp?: { min: number; max: number; currency: string };
+  /** False when the board's list leaves pay out and we haven't fetched this posting's details yet. */
+  compChecked?: boolean;
 }
+
+/** One board check: its postings and version tag, or "unchanged since that tag". */
+export type BoardResult = { unchanged: true } | { unchanged?: false; postings: Posting[]; etag?: string };
 
 export interface FilterResult {
   pass: boolean;

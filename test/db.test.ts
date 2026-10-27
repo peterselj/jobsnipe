@@ -126,6 +126,19 @@ describe('database', () => {
     expect(await as(JOSH, `select title from postings where id = 'ashby:cornerstore:1'`)).toEqual([{ title: 'Head of Product' }]);
   });
 
+  it('sync_matches swaps a person\'s matches in one step and is for the checker only', async () => {
+    await db.exec(`insert into postings (id, company_id, title, url) select 'greenhouse:acme:2', id, 'Staff PM', 'https://z' from companies where board = 'acme'`);
+    const rows = (r: object[]) => `'${JSON.stringify(r)}'::jsonb`;
+    await db.exec(`select sync_matches('${JOSH}', ${rows([{ posting_id: 'greenhouse:acme:2', where_label: 'Toronto area', flags: ['no pay range listed'] }])})`);
+    expect(await as(JOSH, 'select posting_id, where_label, flags from matches')).toEqual([
+      { posting_id: 'greenhouse:acme:2', where_label: 'Toronto area', flags: ['no pay range listed'] },
+    ]);
+    await db.exec(`select sync_matches('${JOSH}', '[]'::jsonb)`);
+    expect(await as(JOSH, 'select * from matches')).toEqual([]);
+    await expect(as(JOSH, `select sync_matches('${JOSH}', '[]'::jsonb)`)).rejects.toThrow(/permission denied/);
+    expect((await db.query(`select has_function_privilege('service_role', 'public.sync_matches(uuid, jsonb)', 'execute') as ok`)).rows).toEqual([{ ok: true }]);
+  });
+
   it('Check now calls GitHub with the Vault key, at most once a minute', async () => {
     await expect(as(JOSH, `select request_check()`)).rejects.toThrow(/github_dispatch_token/);
     await db.exec(`insert into vault.decrypted_secrets values ('github_dispatch_token', 'ghp_test')`);
