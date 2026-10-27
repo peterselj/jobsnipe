@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ago, money } from '../lib/format';
+import { ago, money } from '../../shared/format';
 import type { Feedback, Match, Verdict } from '../lib/types';
 import { Button } from './ui';
 

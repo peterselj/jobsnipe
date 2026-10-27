@@ -35,7 +35,9 @@ under validation" message, that review is why.
 
 1. **Create the database:** SQL Editor → New query → paste all of
    [`supabase/migrations/0001_init.sql`](../supabase/migrations/0001_init.sql) → **Run**. If it stops
-   on `pg_cron` or `pg_net`, enable both under Database → Extensions and run it again.
+   on `pg_cron` or `pg_net`, enable both under Database → Extensions and run it again. Then run each
+   later file in `supabase/migrations/` the same way, in number order (each in a fresh New query).
+   When a pull request adds a migration, its description says to run it, and when: before or after merging.
 2. **Sign-in links:** Authentication → **URL Configuration**:
    - Site URL: `https://peterselj.github.io/jobsnipe/`
    - Redirect URLs: add `https://peterselj.github.io/jobsnipe/**` and `http://localhost:5173/jobsnipe/**`

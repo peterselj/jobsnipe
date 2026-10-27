@@ -6,7 +6,7 @@ import Settings from './components/Settings';
 import SignIn from './components/SignIn';
 import { Button, Mark } from './components/ui';
 import { DemoSource } from './lib/demo';
-import { ago } from './lib/format';
+import { ago } from '../shared/format';
 import { SupabaseSource, type DataSource } from './lib/source';
 import { supabase, supabaseConfigured } from './lib/supabase';
 import type { Match, Snapshot, Verdict } from './lib/types';

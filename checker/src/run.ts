@@ -1,13 +1,17 @@
-import { boardUrl, fetchers } from "./ats/index.js";
+import { boardUrl, compFetchers, fetchers } from "./ats/index.js";
 import { baselineEmail, healthEmail, matchEmail, type BaselineCompany, type Mailer } from "./email.js";
-import { evaluate, toFilters } from "./filters.js";
-import type { CompanyRow, MatchRow, RunSummary, Store, StoredPosting } from "./store.js";
-import type { Ats, FilterResult, Posting } from "./types.js";
+import { evaluate, titleCheck, toFilters } from "./filters.js";
+import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting } from "./store.js";
+import type { Ats, BoardResult, FilterResult, Posting } from "./types.js";
 
 /** Consecutive failed checks before we email about a broken board (2 = about two hours). */
 export const FAILURE_ALERT_AFTER = 2;
 
-type Fetch = (ats: Ats, board: string, company: string) => Promise<Posting[]>;
+/** Cap on per-posting pay lookups per board per run, so a big new watcher can't stall a run. */
+export const MAX_PAY_LOOKUPS = 40;
+
+type Fetch = (ats: Ats, board: string, company: string, etag?: string) => Promise<BoardResult>;
+type FetchComp = (ats: Ats, board: string, p: Posting) => Promise<Posting["comp"]>;
 
 export interface RunOptions {
   store: Store;
@@ -15,6 +19,8 @@ export interface RunOptions {
   trigger?: string;
   now?: Date;
   fetch?: Fetch;
+  /** Pay for one posting, for boards whose list leaves it out. */
+  fetchComp?: FetchComp;
   log?: (msg: string) => void;
 }
 
@@ -41,7 +47,8 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
   const now = opts.now ?? new Date();
   const iso = now.toISOString();
   const log = opts.log ?? (() => {});
-  const fetch: Fetch = opts.fetch ?? ((ats, board, company) => fetchers[ats](board, company));
+  const fetch: Fetch = opts.fetch ?? ((ats, board, company, etag) => fetchers[ats](board, company, etag));
+  const fetchComp: FetchComp = opts.fetchComp ?? (async (ats, board, p) => compFetchers[ats]?.(board, p));
   const summary: RunSummary = { companies_checked: 0, new_postings: 0, alerts_sent: 0, errors: [] };
   const runId = await store.startRun(opts.trigger ?? "manual");
 
@@ -50,15 +57,17 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     const companyIds = [...new Set(watches.map((w) => w.company_id).filter((id): id is number => id !== null))];
     const companies = new Map((await store.companies(companyIds)).map((c) => [c.id, c]));
 
-    // 1. Fetch each board once, however many people watch it.
-    const fetched = new Map<number, Posting[]>();
+    // 1. Fetch each board once, however many people watch it. Most hours a board is unchanged and
+    //    answers with no data (we send the version tag from last time).
+    const fetched = new Map<number, BoardResult>();
     await mapLimit([...companies.values()], 4, async (c) => {
       let patch: Partial<CompanyRow>;
       try {
-        const postings = await fetch(c.ats, c.board, c.name);
-        fetched.set(c.id, postings);
-        patch = { last_checked_at: iso, last_ok_at: iso, last_error: null, consecutive_failures: 0, failure_alert_sent: false, open_postings: postings.length };
-        log(`✓ board #${c.id}: ${postings.length} open`);
+        const result = await fetch(c.ats, c.board, c.name, c.etag ?? undefined);
+        fetched.set(c.id, result);
+        patch = { last_checked_at: iso, last_ok_at: iso, last_error: null, consecutive_failures: 0, failure_alert_sent: false };
+        if (!result.unchanged) patch.open_postings = result.postings.length;
+        log(`✓ board #${c.id}: ${result.unchanged ? "unchanged" : `${result.postings.length} open`}`);
       } catch (e) {
         patch = { last_checked_at: iso, last_error: msg(e), consecutive_failures: c.consecutive_failures + 1 };
         summary.errors.push(`board #${c.id}: ${redact(msg(e))}`);
@@ -69,23 +78,59 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     });
     summary.companies_checked = companies.size;
 
-    // 2. Save postings; work out what's open per board (last good check if today's failed).
+    // 2. Save only what changed on each board and work out what's open. Unchanged or failed boards
+    //    use what's stored. Pay is looked up once per posting, only if its title fits someone.
+    const filtersOf = new Map(people.map((p) => [p.id, toFilters(p.criteria)]));
     const open = new Map<number, StoredPosting[]>();
     for (const c of companies.values()) {
-      const postings = fetched.get(c.id);
-      if (!postings) {
-        open.set(c.id, await store.openPostings(c));
-        continue;
+      const result = fetched.get(c.id);
+      const changes: PostingChanges = { added: [], reopened: [], closed: [], priced: [] };
+      let postings: StoredPosting[];
+      let known: Map<string, KnownPosting> | undefined;
+      if (!result || result.unchanged) {
+        postings = await store.openPostings(c);
+      } else {
+        known = await store.knownPostings(c);
+        const current = new Set(result.postings.map((p) => p.id));
+        postings = result.postings.map((p) => {
+          const k = known!.get(p.id);
+          return k
+            ? { ...p, comp: p.comp ?? k.comp, compChecked: p.compChecked || k.compChecked, companyId: c.id, firstSeenAt: k.firstSeenAt }
+            : { ...p, companyId: c.id, firstSeenAt: iso };
+        });
+        changes.reopened = [...known].filter(([id, k]) => k.closed && current.has(id)).map(([id]) => id);
+        changes.closed = [...known].filter(([id, k]) => !k.closed && !current.has(id)).map(([id]) => id);
       }
-      const firstSeen = await store.recordPostings(c, postings, iso);
-      summary.new_postings += [...firstSeen.values()].filter((t) => t === iso).length;
-      open.set(c.id, postings.map((p) => ({ ...p, companyId: c.id, firstSeenAt: firstSeen.get(p.id) ?? iso })));
+
+      const watchers = watches.filter((w) => w.company_id === c.id).map((w) => filtersOf.get(w.profile_id)!).filter(Boolean);
+      const needPay = postings
+        .filter((p) => p.compChecked === false && watchers.some((f) => !titleCheck(p.title, f)))
+        .slice(0, MAX_PAY_LOOKUPS);
+      await mapLimit(needPay, 4, async (p) => {
+        try {
+          p.comp = await fetchComp(c.ats, c.board, p);
+          p.compChecked = true;
+        } catch {
+          // Left unchecked so the next run tries again; meanwhile it shows as "no pay range listed".
+        }
+      });
+
+      // New postings are saved with their pay; stored ones get just the pay update.
+      changes.added = known ? postings.filter((p) => !known!.has(p.id)) : [];
+      changes.priced = needPay.filter((p) => p.compChecked && (!known || known.has(p.id))).map((p) => ({ id: p.id, comp: p.comp }));
+      if (changes.added.length + changes.reopened.length + changes.closed.length + changes.priced.length) {
+        await store.applyPostingChanges(c, changes, iso);
+      }
+      // Only remember the version tag once its changes are saved, or a crash could skip them for good.
+      if (result && !result.unchanged && result.etag !== c.etag) await store.updateCompany(c.id, { etag: result.etag ?? null });
+      summary.new_postings += changes.added.length;
+      open.set(c.id, postings);
     }
 
     // 3. Per person: matches for the page, a summary for newly watched companies, an email per new match.
     const alerted = await store.alerted();
     for (const person of people) {
-      const filters = toFilters(person.criteria);
+      const filters = filtersOf.get(person.id)!;
       const mine = watches.filter((w) => w.profile_id === person.id);
       const matches: MatchRow[] = [];
       const summaryMatches: { p: Posting; r: FilterResult }[] = [];
@@ -140,7 +185,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         }
       }
 
-      await store.replaceMatches(person.id, matches);
+      await store.syncMatches(person.id, matches);
 
       if (toBaseline.length) {
         summaryMatches.sort((a, b) => (b.p.atsPostedAt ?? "").localeCompare(a.p.atsPostedAt ?? ""));

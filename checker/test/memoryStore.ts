@@ -1,12 +1,14 @@
-import type { CompanyRow, MatchRow, RunSummary, Store, StoredPosting, WatchRow } from "../src/store.js";
-import type { Person, Posting } from "../src/types.js";
+import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "../src/store.js";
+import type { Person } from "../src/types.js";
 
 /** In-memory Store for tests; mirrors what SupabaseStore does against the real tables. */
 export class MemoryStore implements Store {
   people_: Person[] = [];
   watches_: WatchRow[] = [];
   companies_ = new Map<number, CompanyRow>();
-  postings = new Map<string, StoredPosting & { lastSeenAt: string }>();
+  postings = new Map<string, StoredPosting & { closed: boolean }>();
+  /** Rows written to postings, to check that quiet runs write nothing. */
+  postingWrites = 0;
   alerts = new Set<string>();
   matches = new Map<string, MatchRow[]>();
   runs: (RunSummary & { trigger: string; finished: boolean })[] = [];
@@ -14,7 +16,7 @@ export class MemoryStore implements Store {
   addCompany(id: number, ats: CompanyRow["ats"], board: string, name: string) {
     this.companies_.set(id, {
       id, ats, board, name, last_checked_at: null, last_ok_at: null, last_error: null,
-      consecutive_failures: 0, failure_alert_sent: false, open_postings: null,
+      consecutive_failures: 0, failure_alert_sent: false, open_postings: null, etag: null,
     });
   }
 
@@ -37,18 +39,20 @@ export class MemoryStore implements Store {
   async updateCompany(id: number, patch: Partial<CompanyRow>) {
     Object.assign(this.companies_.get(id)!, patch);
   }
-  async recordPostings(c: CompanyRow, postings: Posting[], at: string) {
-    const firstSeen = new Map<string, string>();
-    for (const [id, p] of this.postings) if (p.companyId === c.id) firstSeen.set(id, p.firstSeenAt);
-    for (const p of postings) {
-      const first = firstSeen.get(p.id) ?? at;
-      firstSeen.set(p.id, first);
-      this.postings.set(p.id, { ...p, companyId: c.id, firstSeenAt: first, lastSeenAt: at });
-    }
-    return firstSeen;
+  async knownPostings(c: CompanyRow) {
+    const out = new Map<string, KnownPosting>();
+    for (const [id, p] of this.postings) if (p.companyId === c.id) out.set(id, { firstSeenAt: p.firstSeenAt, closed: p.closed, comp: p.comp, compChecked: p.compChecked !== false });
+    return out;
+  }
+  async applyPostingChanges(c: CompanyRow, ch: PostingChanges, at: string) {
+    for (const p of ch.added) this.postings.set(p.id, { ...p, companyId: c.id, firstSeenAt: at, closed: false });
+    for (const id of ch.reopened) this.postings.get(id)!.closed = false;
+    for (const id of ch.closed) this.postings.get(id)!.closed = true;
+    for (const { id, comp } of ch.priced) Object.assign(this.postings.get(id)!, { comp, compChecked: true });
+    this.postingWrites += ch.added.length + ch.reopened.length + ch.closed.length + ch.priced.length;
   }
   async openPostings(c: CompanyRow) {
-    return [...this.postings.values()].filter((p) => p.companyId === c.id && c.last_ok_at && p.lastSeenAt >= c.last_ok_at);
+    return [...this.postings.values()].filter((p) => p.companyId === c.id && !p.closed);
   }
   async alerted() {
     return new Set(this.alerts);
@@ -59,7 +63,7 @@ export class MemoryStore implements Store {
   async markBaselined(ids: number[], at: string) {
     for (const w of this.watches_) if (ids.includes(w.id)) w.baselined_at = at;
   }
-  async replaceMatches(profileId: string, rows: MatchRow[]) {
+  async syncMatches(profileId: string, rows: MatchRow[]) {
     this.matches.set(profileId, rows);
   }
   async prune() {}

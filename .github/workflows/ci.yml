@@ -1,0 +1,24 @@
+name: Checks
+
+# Every pull request must type-check, pass the tests and build before it's merged.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      # Type-checks the page, checker and shared code, then builds the page.
+      - run: npm run build

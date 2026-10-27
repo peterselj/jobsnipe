@@ -1,22 +1,18 @@
-import type { Ats, Posting } from "../types.js";
+import type { Ats, BoardResult, Posting } from "../types.js";
 import { fetchAshby } from "./ashby.js";
-import { fetchGreenhouse } from "./greenhouse.js";
+import { fetchGreenhouse, greenhouseComp } from "./greenhouse.js";
 import { fetchLever } from "./lever.js";
 
-export const fetchers: Record<Ats, (board: string, company: string) => Promise<Posting[]>> = {
+export { boardUrl } from "../../../shared/ats.js";
+
+export const fetchers: Record<Ats, (board: string, company: string, etag?: string) => Promise<BoardResult>> = {
   greenhouse: fetchGreenhouse,
   lever: fetchLever,
   ashby: fetchAshby,
 };
 
-/** Public page a person would visit, for emails. */
-export function boardUrl(ats: Ats, board: string): string {
-  switch (ats) {
-    case "greenhouse":
-      return `https://job-boards.greenhouse.io/${board}`;
-    case "lever":
-      return `https://jobs.lever.co/${board}`;
-    case "ashby":
-      return `https://jobs.ashbyhq.com/${board}`;
-  }
-}
+/** Boards whose list leaves out pay; their pay is fetched per posting, only when it could matter. */
+export const compFetchers: Partial<Record<Ats, (board: string, p: Posting) => Promise<Posting["comp"]>>> = {
+  greenhouse: greenhouseComp,
+};
+

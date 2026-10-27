@@ -4,5 +4,5 @@
     "types": ["node"],
     "noUnusedLocals": true
   },
-  "include": ["checker", "test"]
+  "include": ["checker", "test", "shared"]
 }

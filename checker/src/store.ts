@@ -12,6 +12,7 @@ export interface CompanyRow {
   consecutive_failures: number;
   failure_alert_sent: boolean;
   open_postings: number | null;
+  etag: string | null;
 }
 
 export interface WatchRow {
@@ -27,6 +28,24 @@ export interface WatchRow {
 export interface StoredPosting extends Posting {
   companyId: number;
   firstSeenAt: string;
+}
+
+/** What's stored about a posting already seen, so a run only writes what changed. */
+export interface KnownPosting {
+  firstSeenAt: string;
+  closed: boolean;
+  comp?: Posting["comp"];
+  compChecked: boolean;
+}
+
+export interface PostingChanges {
+  added: Posting[];
+  /** Back on the board after disappearing. */
+  reopened: string[];
+  /** No longer on the board. */
+  closed: string[];
+  /** Pay just looked up for postings already stored. */
+  priced: { id: string; comp?: Posting["comp"] }[];
 }
 
 export interface MatchRow {
@@ -51,15 +70,18 @@ export interface Store {
   watches(): Promise<WatchRow[]>;
   companies(ids: number[]): Promise<CompanyRow[]>;
   updateCompany(id: number, patch: Partial<CompanyRow>): Promise<void>;
-  /** Save one board's current postings: insert new ones, refresh the rest. Returns first-seen time per id. */
-  recordPostings(company: CompanyRow, postings: Posting[], at: string): Promise<Map<string, string>>;
-  /** Postings seen on the company's last successful check (used when today's check failed). */
+  /** Every stored posting for a board (open or closed). */
+  knownPostings(company: CompanyRow): Promise<Map<string, KnownPosting>>;
+  /** Write only what changed on a board since the last check. */
+  applyPostingChanges(company: CompanyRow, changes: PostingChanges, at: string): Promise<void>;
+  /** Postings still open as of the last good check (used when today's check failed). */
   openPostings(company: CompanyRow): Promise<StoredPosting[]>;
   /** `${profile_id}|${posting_id}` for every alert already sent. */
   alerted(): Promise<Set<string>>;
   recordAlerts(rows: { profile_id: string; posting_id: string }[]): Promise<void>;
   markBaselined(watchIds: number[], at: string): Promise<void>;
-  replaceMatches(profileId: string, rows: MatchRow[]): Promise<void>;
+  /** Make a person's matches exactly `rows`, in one transaction (the inbox never sees a gap). */
+  syncMatches(profileId: string, rows: MatchRow[]): Promise<void>;
   prune(now: Date): Promise<void>;
 }
 
@@ -78,9 +100,14 @@ function postingRow(companyId: number, p: Posting, at: string) {
     comp_min: p.comp ? Math.round(p.comp.min) : null,
     comp_max: p.comp ? Math.round(p.comp.max) : null,
     comp_currency: p.comp?.currency ?? null,
+    comp_checked: p.compChecked ?? true,
+    first_seen_at: at,
     last_seen_at: at,
   };
 }
+
+const compOf = (r: { comp_min: number | null; comp_max: number | null; comp_currency: string | null }) =>
+  r.comp_min != null && r.comp_max != null && r.comp_currency ? { min: r.comp_min, max: r.comp_max, currency: r.comp_currency } : undefined;
 
 export class SupabaseStore implements Store {
   private db: SupabaseClient;
@@ -132,30 +159,34 @@ export class SupabaseStore implements Store {
     this.check(await this.db.from("companies").update(patch).eq("id", id), "update company");
   }
 
-  async recordPostings(company: CompanyRow, postings: Posting[], at: string) {
-    const existing = await this.all<{ id: string; first_seen_at: string }>("load posting ids", (a, b) =>
-      this.db.from("postings").select("id, first_seen_at").eq("company_id", company.id).order("id").range(a, b),
+  async knownPostings(company: CompanyRow) {
+    const rows = await this.all<any>("load postings", (a, b) =>
+      this.db.from("postings").select("id, first_seen_at, closed_at, comp_min, comp_max, comp_currency, comp_checked").eq("company_id", company.id).order("id").range(a, b),
     );
-    const firstSeen = new Map(existing.map((r) => [r.id, r.first_seen_at]));
-    const fresh = postings.filter((p) => !firstSeen.has(p.id));
-    const known = postings.filter((p) => firstSeen.has(p.id));
-    for (let i = 0; i < fresh.length; i += 500) {
-      const rows = fresh.slice(i, i + 500).map((p) => ({ ...postingRow(company.id, p, at), first_seen_at: at }));
-      this.check(await this.db.from("postings").insert(rows), "save new postings");
+    return new Map<string, KnownPosting>(
+      rows.map((r) => [r.id, { firstSeenAt: r.first_seen_at, closed: r.closed_at !== null, comp: compOf(r), compChecked: r.comp_checked }]),
+    );
+  }
+
+  async applyPostingChanges(company: CompanyRow, ch: PostingChanges, at: string) {
+    for (let i = 0; i < ch.added.length; i += 500) {
+      this.check(await this.db.from("postings").insert(ch.added.slice(i, i + 500).map((p) => postingRow(company.id, p, at))), "save new postings");
     }
-    // Upsert without first_seen_at refreshes title/pay/last_seen and leaves when we first saw it alone.
-    for (let i = 0; i < known.length; i += 500) {
-      const rows = known.slice(i, i + 500).map((p) => postingRow(company.id, p, at));
-      this.check(await this.db.from("postings").upsert(rows, { onConflict: "id" }), "refresh postings");
+    // Ids go in the request URL, so update in modest batches.
+    for (const [ids, closed_at] of [[ch.reopened, null], [ch.closed, at]] as const) {
+      for (let i = 0; i < ids.length; i += 100) {
+        this.check(await this.db.from("postings").update({ closed_at }).in("id", ids.slice(i, i + 100)), "mark postings");
+      }
     }
-    for (const p of fresh) firstSeen.set(p.id, at);
-    return firstSeen;
+    for (const { id, comp } of ch.priced) {
+      const pay = { comp_min: comp ? Math.round(comp.min) : null, comp_max: comp ? Math.round(comp.max) : null, comp_currency: comp?.currency ?? null };
+      this.check(await this.db.from("postings").update({ ...pay, comp_checked: true }).eq("id", id), "save pay");
+    }
   }
 
   async openPostings(company: CompanyRow) {
-    if (!company.last_ok_at) return [];
     const rows = await this.all<any>("load open postings", (a, b) =>
-      this.db.from("postings").select("*").eq("company_id", company.id).gte("last_seen_at", company.last_ok_at!).order("id").range(a, b),
+      this.db.from("postings").select("*").eq("company_id", company.id).is("closed_at", null).order("id").range(a, b),
     );
     return rows.map((r) => ({
       id: r.id,
@@ -167,7 +198,8 @@ export class SupabaseStore implements Store {
       workplace: r.workplace ?? undefined,
       url: r.url,
       atsPostedAt: r.ats_posted_at ?? undefined,
-      comp: r.comp_min != null && r.comp_max != null ? { min: r.comp_min, max: r.comp_max, currency: r.comp_currency } : undefined,
+      comp: compOf(r),
+      compChecked: r.comp_checked,
       companyId: company.id,
       firstSeenAt: r.first_seen_at,
     }));
@@ -190,16 +222,13 @@ export class SupabaseStore implements Store {
     this.check(await this.db.from("watches").update({ baselined_at: at }).in("id", watchIds), "mark watches");
   }
 
-  async replaceMatches(profileId: string, rows: MatchRow[]) {
-    this.check(await this.db.from("matches").delete().eq("profile_id", profileId), "clear matches");
-    for (let i = 0; i < rows.length; i += 500) {
-      this.check(await this.db.from("matches").insert(rows.slice(i, i + 500)), "save matches");
-    }
+  async syncMatches(profileId: string, rows: MatchRow[]) {
+    this.check(await this.db.rpc("sync_matches", { p_profile: profileId, p_rows: rows }), "save matches");
   }
 
   async prune(now: Date) {
     const before = (days: number) => new Date(now.getTime() - days * DAY).toISOString();
-    this.check(await this.db.from("postings").delete().lt("last_seen_at", before(30)), "prune postings");
+    this.check(await this.db.from("postings").delete().lt("closed_at", before(30)), "prune postings");
     this.check(await this.db.from("alerts").delete().lt("sent_at", before(90)), "prune alerts");
     this.check(await this.db.from("runs").delete().lt("started_at", before(30)), "prune runs");
     this.check(await this.db.from("check_requests").delete().lt("requested_at", before(7)), "prune requests");

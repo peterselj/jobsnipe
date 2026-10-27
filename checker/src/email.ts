@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { ago, money } from "../../shared/format.js";
 import type { FilterResult, Posting } from "./types.js";
 
 export const SITE = "https://peterselj.github.io/jobsnipe/";
@@ -65,22 +66,11 @@ const FONT = `"Hanken Grotesk", -apple-system, "Segoe UI", Helvetica, Arial, san
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-export function money(c: NonNullable<Posting["comp"]>): string {
-  const k = (n: number) => `${Math.round(n / 1000)}K`;
-  const sym = c.currency === "CAD" ? "CA$" : c.currency === "USD" ? "$" : `${c.currency} `;
-  return `${sym}${k(c.min)}–${sym}${k(c.max)}`;
-}
-
-export function ago(iso: string | undefined, now: Date): string {
-  if (!iso) return "posting time unknown";
-  const h = Math.round((now.getTime() - Date.parse(iso)) / 3_600_000);
-  if (h < 1) return "posted under an hour ago";
-  if (h < 48) return `posted ${h}h ago`;
-  return `posted ${Math.round(h / 24)} days ago`;
-}
+/** "posted 3h ago", in the same wording as the page. */
+const posted = (iso: string | undefined, now: Date) => (iso ? `posted ${ago(iso, now)}` : "posting time unknown");
 
 function postingFacts(p: Posting, r: FilterResult, now: Date): string[] {
-  return [r.where ?? p.locations.join("; "), p.comp ? money(p.comp) : "", ago(p.atsPostedAt, now)].filter(Boolean);
+  return [r.where ?? p.locations.join("; "), p.comp ? money(p.comp) : "", posted(p.atsPostedAt, now)].filter(Boolean);
 }
 
 function card(p: Posting, r: FilterResult, now: Date): string {

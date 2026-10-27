@@ -1,13 +1,7 @@
-export type Ats = 'greenhouse' | 'lever' | 'ashby';
+import type { Ats } from '../../shared/ats';
+import type { Criteria } from '../../shared/criteria';
 
-/** A person's filters; same shape as `Criteria` in checker/src/types.ts (stored in profiles.criteria). */
-export interface Criteria {
-  titles?: { include?: string[]; exclude?: string[] };
-  seniority?: { require?: string[]; unlevelled_pay_min?: number };
-  locations?: { name: string; match: string[] }[];
-  remote?: { allowed?: boolean; countries?: string[] };
-  comp_floor?: Record<string, number>;
-}
+export type { Ats, Criteria };
 
 export interface Profile {
   id: string;

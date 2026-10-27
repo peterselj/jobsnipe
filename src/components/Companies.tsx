@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ATS_LABEL, boardUrl } from '../lib/ats';
-import { ago } from '../lib/format';
+import { ago } from '../../shared/format';
 import type { Ats, NewWatch, Watch } from '../lib/types';
 import FindBoard from './FindBoard';
 import { Button, SectionHeader } from './ui';
