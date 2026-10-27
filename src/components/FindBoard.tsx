@@ -1,17 +1,22 @@
 import { useState } from 'react';
 import { ATS_LABEL, boardUrl, findBoards, looksLikeUrl, type BoardHit } from '../lib/ats';
-import type { CompanyConfig } from '../lib/types';
+import type { NewWatch } from '../lib/types';
 import { Button, Field, Input, Modal } from './ui';
+
+/** "major-league-baseball" -> "Major League Baseball". */
+export const prettyBoard = (board: string) => board.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
 /**
  * Find where a company posts jobs. A name is tried as likely board slugs on Greenhouse, Lever and Ashby;
  * a pasted job link is the sure route when the board name differs from the company name.
  */
-export default function FindBoard({ title, initialName, onClose, onPick }: {
+export default function FindBoard({ title, initialName, allowUnmonitored = true, onClose, onPick }: {
   title: string;
   initialName: string;
+  /** Offer "add as not monitored" when nothing is found (not when fixing an existing company's board). */
+  allowUnmonitored?: boolean;
   onClose: () => void;
-  onPick: (c: CompanyConfig) => Promise<void>;
+  onPick: (c: NewWatch) => Promise<void>;
 }) {
   const [query, setQuery] = useState(initialName);
   const [name, setName] = useState(initialName);
@@ -30,16 +35,18 @@ export default function FindBoard({ title, initialName, onClose, onPick }: {
       const found = await findBoards(query.trim());
       setHits(found);
       if (!name.trim()) {
+        // Greenhouse reports the company's name; for a pasted Lever/Ashby link, start from the board name.
         const display = found[0]?.displayName;
         if (display) setName(display);
         else if (!looksLikeUrl(query)) setName(query.trim());
+        else if (found[0]) setName(prettyBoard(found[0].board));
       }
     } finally {
       setSearching(false);
     }
   };
 
-  const pick = async (c: CompanyConfig) => {
+  const pick = async (c: NewWatch) => {
     if (!c.name.trim()) {
       setError('Give the company a name first.');
       return;
@@ -89,15 +96,16 @@ export default function FindBoard({ title, initialName, onClose, onPick }: {
             ) : (
               <div className="space-y-2 rounded-lg bg-paper px-3 py-3 text-sm">
                 <p>
-                  Not found on Greenhouse, Lever or Ashby. Try pasting a job link from their careers page; if they post
-                  somewhere else, you can still list them as not monitored for now.
+                  Not found on Greenhouse, Lever or Ashby. Try pasting a job link from their careers page{allowUnmonitored ? '; if they post somewhere else, you can still list them as not monitored for now' : ''}.
                 </p>
+                {allowUnmonitored && (<>
                 <Field label="Careers page (optional)">
                   <Input value={careersUrl} onChange={(e) => setCareersUrl(e.target.value)} placeholder="https://…" />
                 </Field>
                 <Button disabled={saving} onClick={() => pick({ name, ats: 'none', careers_url: careersUrl.trim() || undefined, note: 'job board not found yet' })}>
                   Add as not monitored
                 </Button>
+                </>)}
               </div>
             )}
           </>
