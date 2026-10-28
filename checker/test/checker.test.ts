@@ -355,3 +355,22 @@ describe("paused alerts", () => {
     expect(sent.map((e) => e.subject)).toEqual(["New match: Senior Product Manager at Acme (NYC area)"]);
   });
 });
+
+describe("age limit", () => {
+  it("keeps old postings out of matches and emails, as near misses", async () => {
+    const { store, sent, mailer } = setup();
+    store.people_[0].criteria = { ...CRITERIA, max_age_days: 60 };
+    const now = at(1);
+    const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000).toISOString();
+    const board = [
+      post({ id: "greenhouse:acme:1", atsPostedAt: daysAgo(5), compChecked: true }),
+      post({ id: "greenhouse:acme:2", atsPostedAt: daysAgo(340), compChecked: true }),
+      post({ id: "greenhouse:acme:3", compChecked: true }), // no posting date: kept
+    ];
+    await runCheck({ store, mailer, fetch: async () => ({ postings: board }), now });
+    const rows = store.matches.get(JOSH)!;
+    expect(rows.filter((m) => !m.near_miss).map((m) => m.posting_id)).toEqual(["greenhouse:acme:1", "greenhouse:acme:3"]);
+    expect(rows.find((m) => m.posting_id === "greenhouse:acme:2")).toMatchObject({ near_miss: "age", miss_detail: "Posted 340 days ago (your limit: 60)" });
+    expect(sent[0].subject).toBe("JobSnipe is watching: 2 open matches");
+  });
+});

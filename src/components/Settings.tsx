@@ -54,6 +54,7 @@ export default function Settings({ profile, nearMisses, onSave, onPause, onDelet
   const [countries, setCountries] = useState<string[]>(c.remote?.countries ?? ['US']);
   const [floorUsd, setFloorUsd] = useState(c.comp_floor?.USD?.toString() ?? '');
   const [floorCad, setFloorCad] = useState(c.comp_floor?.CAD?.toString() ?? '');
+  const [maxAge, setMaxAge] = useState(c.max_age_days?.toString() ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +73,7 @@ export default function Settings({ profile, nearMisses, onSave, onPause, onDelet
       locations: areas.filter((a) => toList(a.match).length).map((a) => ({ name: a.name.trim() || toList(a.match)[0], match: toList(a.match) })),
       remote: { allowed: remote, countries: remote ? countries : [] },
       comp_floor,
+      max_age_days: num(maxAge),
     };
     setSaving(true);
     try {
@@ -202,6 +204,20 @@ export default function Settings({ profile, nearMisses, onSave, onPause, onDelet
             {payMisses.slice(0, 3).map((m) => `${m.company} ${money(m.comp!)}`).join(', ')}
             {payMisses.length > 3 ? ', …' : ''}). Type a lower number to see how many would show up.
           </p>
+        )}
+      </div>
+
+      <div className={card}>
+        <SectionHeader title="Freshness" />
+        <p className="mb-3 text-sm text-muted">
+          Roles left up for months are usually evergreen listings or long since filled. Older ones skip your inbox and
+          show under Near misses instead.
+        </p>
+        <Field label="Skip roles posted more than this many days ago" hint="Leave blank for any age.">
+          <Input className="max-w-[160px]" inputMode="numeric" value={maxAge} onChange={(e) => setMaxAge(e.target.value)} placeholder="60" />
+        </Field>
+        {missing('age').length > 0 && (
+          <p className={hint}>Your limit is hiding {missing('age').length} open role{missing('age').length > 1 ? 's' : ''} that otherwise fit. See them under Near misses → Age.</p>
         )}
       </div>
 

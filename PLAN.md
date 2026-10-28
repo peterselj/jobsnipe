@@ -64,6 +64,8 @@ Places they can surface, and what's built:
 - **Built (Oct 27):** pause alerts, delete account, per-company filters (e.g. "Toronto only at this
   company", "skip titles with technical here"), near misses (above), and leaner hourly checks
   (unchanged boards cost almost nothing; only changes are written).
+- **Built (Oct 27, later):** Archive (from any folder, keeps your decision, never resurfaces) and an
+  age limit ("skip roles posted more than N days ago"; older ones become Age near misses).
 - **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
   proposals from feedback; "Send to JobBoard".
 - **Text alerts** for people who prefer them (ntfy or Twilio).

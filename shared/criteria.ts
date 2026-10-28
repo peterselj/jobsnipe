@@ -10,6 +10,8 @@ export interface Criteria {
   remote?: { allowed?: boolean; countries?: string[] };
   /** Minimum acceptable top-of-range per currency. Postings without a listed range pass. */
   comp_floor?: Record<string, number>;
+  /** Skip roles posted longer ago than this many days. Unset = any age. */
+  max_age_days?: number;
 }
 
 /**

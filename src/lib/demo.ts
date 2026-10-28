@@ -19,6 +19,7 @@ const PROFILE: Profile = {
     locations: [{ name: 'NYC area', match: ['new york', 'nyc', 'brooklyn'] }, { name: 'Toronto area', match: ['toronto', 'ontario'] }],
     remote: { allowed: true, countries: ['US', 'CA'] },
     comp_floor: { USD: 140000, CAD: 140000 },
+    max_age_days: 60,
   },
 };
 
@@ -30,6 +31,7 @@ const MATCHES: Match[] = [
   { id: 'd6', company: 'Halcyon AI', title: 'Senior Product Manager, Payments', url: 'https://example.com/jobs/6', where: 'NYC area', flags: [], comp: { min: 110000, max: 135000, currency: 'USD' }, atsPostedAt: iso(30), firstSeenAt: iso(29), nearMiss: 'pay', missDetail: 'Pay tops out at $135K (your floor: $140K)' },
   { id: 'd7', company: 'Northwind Media', title: 'Staff Product Manager, Search', url: 'https://example.com/jobs/7', flags: [], comp: { min: 220000, max: 260000, currency: 'USD' }, atsPostedAt: iso(50), firstSeenAt: iso(49), nearMiss: 'location', missDetail: 'San Francisco, CA' },
   { id: 'd8', company: 'Brightpath', title: 'Product Manager, Onboarding', url: 'https://example.com/jobs/8', where: 'Remote (US)', flags: [], comp: { min: 130000, max: 150000, currency: 'USD' }, atsPostedAt: iso(80), firstSeenAt: iso(79), nearMiss: 'seniority', missDetail: 'No senior level in the title' },
+  { id: 'd9', company: 'Halcyon AI', title: 'Lead Product Manager, Growth', url: 'https://example.com/jobs/9', where: 'NYC area', flags: [], comp: { min: 200000, max: 240000, currency: 'USD' }, atsPostedAt: iso(340 * 24), firstSeenAt: iso(300), nearMiss: 'age', missDetail: 'Posted 340 days ago (your limit: 60)' },
   { id: 'd5', company: 'Northwind Media', title: 'Group Product Manager, Ads', url: 'https://example.com/jobs/5', where: 'Remote (scope unclear)', flags: ["remote, but the allowed countries aren't stated"], comp: { min: 210000, max: 250000, currency: 'USD' }, atsPostedAt: iso(400), firstSeenAt: iso(390) },
 ];
 
