@@ -6,6 +6,8 @@ export interface DataSource {
   kind: 'supabase' | 'demo';
   load(): Promise<Snapshot>;
   setVerdict(m: Pick<Match, 'id' | 'company' | 'title' | 'url'>, v: Verdict | null): Promise<void>;
+  /** Save many decisions in one go (e.g. "Archive all"). */
+  setVerdicts(items: { m: Pick<Match, 'id' | 'company' | 'title' | 'url'>; v: Verdict }[]): Promise<void>;
   addWatch(w: NewWatch): Promise<void>;
   changeBoard(watchId: number, ats: Ats, board: string): Promise<void>;
   removeWatch(watchId: number): Promise<void>;
@@ -121,12 +123,8 @@ export class SupabaseSource implements DataSource {
     };
   }
 
-  async setVerdict(m: Pick<Match, 'id' | 'company' | 'title' | 'url'>, v: Verdict | null) {
-    if (!v) {
-      const { error } = await this.db.from('verdicts').delete().eq('posting_id', m.id);
-      return fail('Undoing', error);
-    }
-    const { error } = await this.db.from('verdicts').upsert({
+  private row(m: Pick<Match, 'id' | 'company' | 'title' | 'url'>, v: Verdict) {
+    return {
       profile_id: this.userId,
       posting_id: m.id,
       verdict: v.verdict ?? null,
@@ -136,7 +134,21 @@ export class SupabaseSource implements DataSource {
       title: m.title,
       url: m.url || v.url || null,
       created_at: v.at,
-    });
+    };
+  }
+
+  async setVerdict(m: Pick<Match, 'id' | 'company' | 'title' | 'url'>, v: Verdict | null) {
+    if (!v) {
+      const { error } = await this.db.from('verdicts').delete().eq('posting_id', m.id);
+      return fail('Undoing', error);
+    }
+    const { error } = await this.db.from('verdicts').upsert(this.row(m, v));
+    fail('Saving', error);
+  }
+
+  async setVerdicts(items: { m: Pick<Match, 'id' | 'company' | 'title' | 'url'>; v: Verdict }[]) {
+    if (!items.length) return;
+    const { error } = await this.db.from('verdicts').upsert(items.map(({ m, v }) => this.row(m, v)));
     fail('Saving', error);
   }
 

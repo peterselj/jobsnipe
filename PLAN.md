@@ -66,6 +66,7 @@ Places they can surface, and what's built:
   (unchanged boards cost almost nothing; only changes are written).
 - **Built (Oct 27, later):** Archive (from any folder, keeps your decision, never resurfaces) and an
   age limit ("skip roles posted more than N days ago"; older ones become Age near misses).
+  Then "Archive all" on each folder (one save for the whole list, keeps each role's decision).
 - **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
   proposals from feedback; "Send to JobBoard".
 - **Text alerts** for people who prefer them (ntfy or Twilio).
