@@ -13,6 +13,7 @@ interface Props {
   feedback: Feedback;
   /** Save a role's new state: a decision, archived, or null (back to the inbox). */
   onVerdict: (m: Match, entry: Verdict | null) => void;
+  onVerdicts: (items: { m: Match; v: Verdict }[]) => void;
   /** Shown in the inbox when there's nothing to triage because no filters are set. */
   needsFilters?: boolean;
   onOpenSettings?: () => void;
@@ -26,7 +27,7 @@ const DAY = 86_400_000;
  * good, so it never comes back. Decided and archived roles are read from the saved verdicts, so
  * they stay listed after the posting closes.
  */
-export default function Matches({ matches, feedback, onVerdict, needsFilters, onOpenSettings }: Props) {
+export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings }: Props) {
   const [folder, setFolder] = useState<Folder>('inbox');
   const [missFilter, setMissFilter] = useState<MissCheck | null>(null);
   const open = new Map(matches.map((m) => [m.id, m]));
@@ -48,6 +49,19 @@ export default function Matches({ matches, feedback, onVerdict, needsFilters, on
     archive: fromVerdicts((f) => !!f.archivedAt, (f) => f.archivedAt!),
   };
   const shown = lists[folder];
+
+  // Archive everything in the current view, keeping each role's decision.
+  const archiveAll = () => {
+    const where = tabs.find((t) => t.key === folder)!.label.replace('★ ', '') + (folder === 'near' && missFilter ? ` (${MISS_LABEL[missFilter]})` : '');
+    if (!confirm(`Archive all ${shown.length} roles in ${where}? You can restore any of them from the Archive.`)) return;
+    const at = new Date().toISOString();
+    onVerdicts(
+      shown.map((m) => {
+        const v = feedback[m.id];
+        return { m, v: v ? { ...v, archivedAt: at } : { at, company: m.company, title: m.title, url: m.url, archivedAt: at } };
+      }),
+    );
+  };
 
   const tabs: { key: Folder; label: string }[] = [
     { key: 'inbox', label: 'Inbox' },
@@ -98,6 +112,12 @@ export default function Matches({ matches, feedback, onVerdict, needsFilters, on
               ),
             )}
           </div>
+        </div>
+      )}
+
+      {folder !== 'archive' && shown.length > 1 && (
+        <div className="mb-2 flex justify-end">
+          <Button size="sm" variant="ghost" onClick={archiveAll}>Archive all {shown.length} →</Button>
         </div>
       )}
 

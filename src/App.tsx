@@ -118,6 +118,21 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
     }
   };
 
+  /** Save many roles' new states at once (e.g. "Archive all"). */
+  const onVerdicts = async (items: { m: Match; v: Verdict }[]) => {
+    if (!snap || !items.length) return;
+    const prev = snap.feedback;
+    const next = { ...prev };
+    for (const { m, v } of items) next[m.id] = v;
+    setSnap({ ...snap, feedback: next });
+    try {
+      await source.setVerdicts(items);
+    } catch (e) {
+      setSnap((s) => (s ? { ...s, feedback: prev } : s));
+      fail(e);
+    }
+  };
+
   if (!snap) {
     return (
       <div className="min-h-screen bg-paper px-4 py-10 text-sm text-muted">
@@ -230,6 +245,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             matches={snap.matches}
             feedback={snap.feedback}
             onVerdict={onVerdict}
+            onVerdicts={onVerdicts}
             needsFilters={needsFilters}
             onOpenSettings={() => setView('settings')}
           />

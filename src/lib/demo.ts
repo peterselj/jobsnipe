@@ -62,6 +62,10 @@ export class DemoSource implements DataSource {
     };
   }
 
+  async setVerdicts(items: { m: Pick<Match, 'id'>; v: Verdict }[]) {
+    for (const { m, v } of items) this.feedback[m.id] = v;
+  }
+
   async setVerdict(m: Pick<Match, 'id'>, v: Verdict | null) {
     if (v) this.feedback[m.id] = v;
     else delete this.feedback[m.id];
