@@ -54,13 +54,57 @@ Places they can surface, and what's built:
 6. **Per company:** a company's near misses can suggest a per-company filter ("Anthropic: 12 NYC near
    misses, 0 Toronto").
 
-## Next
+## Next up: coverage (Phase 3, reshaped)
+
+Two lanes, kept apart so breadth never costs speed:
+
+| | **Your list** (fast lane) | **Discover** (new) |
+|---|---|---|
+| What | Companies you chose | Everything else that passes all your filters |
+| Checked | Hourly | Hourly or daily, depending on the source |
+| Alerts | Instant email per match | Digest: daily or weekly (your choice), or off |
+| On the page | Inbox | A Discover tab, labelled with where it came from ("via Sequoia") |
+
+A Discover match has a **Watch this company** button: it finds the company's own board and moves it
+to your list, so from then on you hear within the hour. Discover skips companies already on your
+list, shows no near misses (there would be hundreds), and the same job seen in two places is shown
+once.
+
+### Sources, in build order
+
+1. **Discover foundation + VC portfolio boards (Getro).** Most VC job boards (a16z, Sequoia, General
+   Catalyst, Khosla, Lightspeed, Thrive, Bessemer, Felicis, Lux...) run on Getro or Consider; one
+   reader per platform covers most of them. Start with 2-3 VCs to gauge noise. Includes the digest
+   email, its setting, and Watch this company. These boards copy jobs from company boards about a
+   day late, which is fine for Discover.
+2. **Companies' own sites, the common systems.** Readers for Workday (most big companies),
+   SmartRecruiters and Workable, all with public job lists; Find board learns to spot them. These are
+   fast-lane boards like Greenhouse: hourly, instant emails.
+3. **Consider** (the rest of the VC boards) and the **YC company directory** (public; lists who's
+   hiring and their sites, so YC companies can be found on their Ashby/Lever/Greenhouse boards
+   without logging in to Work at a Startup).
+4. **Custom career pages.** Many pages describe each job in a hidden, standard format (schema.org
+   JobPosting, which Google for Jobs requires); read that first. For pages without it, check the page
+   for changes and have AI pull the jobs out. AI needs an Anthropic API key; a small model reading a
+   few pages a day costs a few dollars a month at most.
+5. **Email lane.** A JobSnipe inbox that you forward job-alert emails to, or set them to arrive at:
+   Wellfound, LinkedIn, YC's Work at a Startup, and newsletters (Ali Rohde, next play, a16z Jobs,
+   Nonlinear). AI pulls out the jobs, your filters decide, matches go to Discover. Plus HN "Who's
+   Hiring" (one thread a month, read through its public search API).
+
+**Why Wellfound and Work at a Startup go through email, not direct reading:** Wellfound blocks
+automated reading and its terms forbid it; Work at a Startup needs a login, and automating your
+account risks getting it banned. Both send job-alert emails you control, which is allowed and gets
+the same jobs.
+
+**Skipped:** fellowships (college and early career).
+
+## Later
 
 - **Scoring (rest of Phase 2).** AI rubric: tier, fit reason, flags, open questions. Each cue is a
   separate optional field so any that feel cheesy or redundant can be switched off.
-- **Alert batching.** Immediate / hourly / daily / weekly, once immediate gets noisy.
-- **Slow lane (Phase 3).** Re-screen LinkedIn job-alert emails with your own filters; one or two
-  aggregators; Teamtailor and other boards the checker can't read yet; de-duplication.
+- **Alert batching** for your list too (the Discover digest builds the daily/weekly email).
+- **Teamtailor, iCIMS** and other less common systems, if companies you want use them.
 - **Built (Oct 27):** pause alerts, delete account, per-company filters (e.g. "Toronto only at this
   company", "skip titles with technical here"), near misses (above), and leaner hourly checks
   (unchanged boards cost almost nothing; only changes are written).
