@@ -67,6 +67,10 @@ Places they can surface, and what's built:
 - **Built (Oct 27, later):** Archive (from any folder, keeps your decision, never resurfaces) and an
   age limit ("skip roles posted more than N days ago"; older ones become Age near misses).
   Then "Archive all" on each folder (one save for the whole list, keeps each role's decision).
+- **Built (Nov 2):** "posted" means when a job went public. Lever only gives the date a job was
+  created (Waabi's Creative Director: created Oct 29, published Nov 2, emailed within the hour but
+  labelled "4d ago"). A board date earlier than our last look is replaced by when we first saw the
+  job, for the label and the age limit. Checks stay hourly.
 - **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
   proposals from feedback; "Send to JobBoard".
 - **Text alerts** for people who prefer them (ntfy or Twilio).

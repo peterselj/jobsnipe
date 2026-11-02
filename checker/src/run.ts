@@ -43,6 +43,17 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 export const redact = (text: string) =>
   text.replace(/https?:\/\/\S+/g, "<url>").replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, "<email>");
 
+/**
+ * When a new posting really went public. A board's own date can be much earlier: Lever only gives
+ * the date the job was created, which may be days before it was published. If that date is before
+ * our last successful read of the board, it can't be right (we looked and the job wasn't there), so
+ * the job went public since then: use now. On a board's first read we can't tell, so keep its date.
+ */
+export function publishedAt(boardDate: string | undefined, lastOk: string | null, now: string): string | undefined {
+  if (!lastOk) return boardDate;
+  return !boardDate || boardDate < lastOk ? now : boardDate;
+}
+
 export async function runCheck(opts: RunOptions): Promise<RunSummary> {
   const { store, mailer } = opts;
   const now = opts.now ?? new Date();
@@ -57,6 +68,9 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     const [people, watches] = await Promise.all([store.people(), store.watches()]);
     const companyIds = [...new Set(watches.map((w) => w.company_id).filter((id): id is number => id !== null))];
     const companies = new Map((await store.companies(companyIds)).map((c) => [c.id, c]));
+
+    // When each board was last read successfully, before this run (see publishedAt below).
+    const lastOk = new Map([...companies.values()].map((c) => [c.id, c.last_ok_at]));
 
     // 1. Fetch each board once, however many people watch it. Most hours a board is unchanged and
     //    answers with no data (we send the version tag from last time).
@@ -104,8 +118,8 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         postings = result.postings.map((p) => {
           const k = known!.get(p.id);
           return k
-            ? { ...p, comp: p.comp ?? k.comp, compChecked: p.compChecked || k.compChecked, companyId: c.id, firstSeenAt: k.firstSeenAt }
-            : { ...p, companyId: c.id, firstSeenAt: iso };
+            ? { ...p, atsPostedAt: k.atsPostedAt ?? p.atsPostedAt, comp: p.comp ?? k.comp, compChecked: p.compChecked || k.compChecked, companyId: c.id, firstSeenAt: k.firstSeenAt }
+            : { ...p, atsPostedAt: publishedAt(p.atsPostedAt, lastOk.get(c.id) ?? null, iso), companyId: c.id, firstSeenAt: iso };
         });
         changes.reopened = [...known].filter(([id, k]) => k.closed && current.has(id)).map(([id]) => id);
         changes.closed = [...known].filter(([id, k]) => !k.closed && !current.has(id)).map(([id]) => id);
