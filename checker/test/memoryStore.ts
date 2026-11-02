@@ -41,7 +41,7 @@ export class MemoryStore implements Store {
   }
   async knownPostings(c: CompanyRow) {
     const out = new Map<string, KnownPosting>();
-    for (const [id, p] of this.postings) if (p.companyId === c.id) out.set(id, { firstSeenAt: p.firstSeenAt, closed: p.closed, comp: p.comp, compChecked: p.compChecked !== false });
+    for (const [id, p] of this.postings) if (p.companyId === c.id) out.set(id, { firstSeenAt: p.firstSeenAt, atsPostedAt: p.atsPostedAt, closed: p.closed, comp: p.comp, compChecked: p.compChecked !== false });
     return out;
   }
   async applyPostingChanges(c: CompanyRow, ch: PostingChanges, at: string) {

@@ -373,4 +373,28 @@ describe("age limit", () => {
     expect(rows.find((m) => m.posting_id === "greenhouse:acme:2")).toMatchObject({ near_miss: "age", miss_detail: "Posted 340 days ago (your limit: 60)" });
     expect(sent[0].subject).toBe("JobSnipe is watching: 2 open matches");
   });
+  it("dates a job by when it went public, not when the board says it was created", async () => {
+    const { store, sent, mailer } = setup();
+    store.people_[0].criteria = { ...CRITERIA, max_age_days: 3 };
+    let board: Posting[] = [];
+    const fetch = async () => ({ postings: board });
+    await runCheck({ store, mailer, fetch, now: at(1) });
+
+    // Created in the hiring system 4 days ago but only just published (Lever gives only the
+    // created date); and one whose board date falls since our last look, which we keep.
+    const daysAgo = (d: number) => new Date(at(5).getTime() - d * 86_400_000).toISOString();
+    board = [
+      post({ id: "lever:acme:1", atsPostedAt: daysAgo(4), compChecked: true }),
+      post({ id: "greenhouse:acme:2", atsPostedAt: at(4).toISOString(), compChecked: true }),
+    ];
+    await runCheck({ store, mailer, fetch, now: at(5) });
+    expect(store.postings.get("lever:acme:1")!.atsPostedAt).toBe(at(5).toISOString());
+    expect(store.postings.get("greenhouse:acme:2")!.atsPostedAt).toBe(at(4).toISOString());
+    expect(sent.filter((e) => e.subject.startsWith("New match"))).toHaveLength(2); // not an Age near miss
+    expect(sent.at(-2)!.text).toMatch(/posted just now|posted 0m ago/);
+
+    // Later reads keep the corrected date even though the board still says 4 days.
+    await runCheck({ store, mailer, fetch, now: at(6) });
+    expect(store.matches.get(JOSH)!.filter((m) => !m.near_miss)).toHaveLength(2);
+  });
 });

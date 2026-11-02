@@ -191,4 +191,26 @@ describe('database', () => {
     await expect(as(JOSH, `select dispatch_check('x')`)).rejects.toThrow(/permission denied/);
     await expect(as(null, `select request_check()`)).rejects.toThrow(/permission denied/);
   });
+
+  it('0006 moves only wrongly early publish dates to when the job was first seen', async () => {
+    await db.exec(`
+      insert into companies (ats, board, name) values ('lever', 'datefix', 'Date Fix');
+      insert into postings (id, company_id, title, url, ats_posted_at, first_seen_at)
+      select v.id, c.id, 'PM', 'https://z', v.posted::timestamptz, v.seen::timestamptz
+      from companies c, (values
+        ('lever:datefix:first', '2026-09-01T00:00Z', '2026-10-27T10:00Z'),  -- already up on the first read: kept
+        ('lever:datefix:late',  '2026-10-29T20:49Z', '2026-11-02T21:17Z'),  -- drafted, published days later: fixed
+        ('lever:datefix:exact', '2026-11-02T20:40Z', '2026-11-02T21:17Z')   -- published since the last look: kept
+      ) v(id, posted, seen) where c.board = 'datefix';
+    `);
+    await db.exec(migrations.find((m) => m.includes('ats_posted_at = p.first_seen_at'))!);
+    const rows = (await db.query<{ id: string; at: string }>(
+      `select id, to_char(ats_posted_at at time zone 'UTC', 'MM-DD HH24:MI') as at from postings where id like 'lever:datefix:%' order by id`,
+    )).rows;
+    expect(rows).toEqual([
+      { id: 'lever:datefix:exact', at: '11-02 20:40' },
+      { id: 'lever:datefix:first', at: '09-01 00:00' },
+      { id: 'lever:datefix:late', at: '11-02 21:17' },
+    ]);
+  });
 });

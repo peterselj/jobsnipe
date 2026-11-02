@@ -34,6 +34,8 @@ export interface StoredPosting extends Posting {
 /** What's stored about a posting already seen, so a run only writes what changed. */
 export interface KnownPosting {
   firstSeenAt: string;
+  /** As stored, which may have been corrected to when the job went public (see publishedAt). */
+  atsPostedAt?: string;
   closed: boolean;
   comp?: Posting["comp"];
   compChecked: boolean;
@@ -165,10 +167,10 @@ export class SupabaseStore implements Store {
 
   async knownPostings(company: CompanyRow) {
     const rows = await this.all<any>("load postings", (a, b) =>
-      this.db.from("postings").select("id, first_seen_at, closed_at, comp_min, comp_max, comp_currency, comp_checked").eq("company_id", company.id).order("id").range(a, b),
+      this.db.from("postings").select("id, first_seen_at, ats_posted_at, closed_at, comp_min, comp_max, comp_currency, comp_checked").eq("company_id", company.id).order("id").range(a, b),
     );
     return new Map<string, KnownPosting>(
-      rows.map((r) => [r.id, { firstSeenAt: r.first_seen_at, closed: r.closed_at !== null, comp: compOf(r), compChecked: r.comp_checked }]),
+      rows.map((r) => [r.id, { firstSeenAt: r.first_seen_at, atsPostedAt: r.ats_posted_at ?? undefined, closed: r.closed_at !== null, comp: compOf(r), compChecked: r.comp_checked }]),
     );
   }
 
