@@ -10,7 +10,11 @@ export interface Profile {
   criteria: Criteria;
   alert_mode: string;
   alerts_paused: boolean;
+  /** How often the Discover digest email comes. */
+  digest_every: DigestEvery;
 }
+
+export type DigestEvery = 'daily' | 'weekly' | 'biweekly' | 'never';
 
 export interface Match {
   id: string;
@@ -25,6 +29,19 @@ export interface Match {
   /** Set for a near miss: the one check it failed, and why. */
   nearMiss?: 'seniority' | 'location' | 'pay' | 'age';
   missDetail?: string;
+  /** Set for Discover: passes your filters at a company you don't watch; which VC boards list it. */
+  via?: string[];
+  /** The company's own board, when known (for "Watch this company"). */
+  ats?: Ats;
+  board?: string;
+}
+
+/** A VC portfolio job board Discover reads. */
+export interface DiscoverSource {
+  name: string;
+  host: string;
+  lastOkAt?: string;
+  lastError?: string;
 }
 
 /** A company someone follows, with how its board is doing. */
@@ -81,4 +98,5 @@ export interface Snapshot {
   matches: Match[];
   feedback: Feedback;
   lastRun?: Run;
+  discoverSources: DiscoverSource[];
 }

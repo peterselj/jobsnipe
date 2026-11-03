@@ -13,6 +13,7 @@ const PROFILE: Profile = {
   email: 'demo@example.com',
   alert_mode: 'immediate',
   alerts_paused: false,
+  digest_every: 'daily',
   criteria: {
     titles: { include: ['product manager', 'head of product'], exclude: ['product marketing', 'intern'] },
     seniority: { require: ['senior', 'staff', 'principal', 'lead', 'group', 'director', 'head'], unlevelled_pay_min: 180000 },
@@ -32,6 +33,9 @@ const MATCHES: Match[] = [
   { id: 'd7', company: 'Northwind Media', title: 'Staff Product Manager, Search', url: 'https://example.com/jobs/7', flags: [], comp: { min: 220000, max: 260000, currency: 'USD' }, atsPostedAt: iso(50), firstSeenAt: iso(49), nearMiss: 'location', missDetail: 'San Francisco, CA' },
   { id: 'd8', company: 'Brightpath', title: 'Product Manager, Onboarding', url: 'https://example.com/jobs/8', where: 'Remote (US)', flags: [], comp: { min: 130000, max: 150000, currency: 'USD' }, atsPostedAt: iso(80), firstSeenAt: iso(79), nearMiss: 'seniority', missDetail: 'No senior level in the title' },
   { id: 'd9', company: 'Halcyon AI', title: 'Lead Product Manager, Growth', url: 'https://example.com/jobs/9', where: 'NYC area', flags: [], comp: { min: 200000, max: 240000, currency: 'USD' }, atsPostedAt: iso(340 * 24), firstSeenAt: iso(300), nearMiss: 'age', missDetail: 'Posted 340 days ago (your limit: 60)' },
+  { id: 'x1', company: 'Lumen Health', title: 'Senior Product Manager, Patient Experience', url: 'https://example.com/jobs/x1', where: 'NYC area', flags: [], comp: { min: 185000, max: 225000, currency: 'USD' }, atsPostedAt: iso(26), firstSeenAt: iso(20), via: ['General Catalyst', 'Thrive Capital'], ats: 'ashby', board: 'lumenhealth' },
+  { id: 'x2', company: 'Quarry Labs', title: 'Staff Product Manager, Developer Tools', url: 'https://example.com/jobs/x2', where: 'Remote (US)', flags: ['no pay range listed'], atsPostedAt: iso(50), firstSeenAt: iso(44), via: ['Accel'] },
+  { id: 'x3', company: 'Tidewater', title: 'Group Product Manager, Payments', url: 'https://example.com/jobs/x3', where: 'Toronto area', flags: [], comp: { min: 190000, max: 240000, currency: 'CAD' }, atsPostedAt: iso(80), firstSeenAt: iso(70), via: ['Lux Capital'], ats: 'greenhouse', board: 'tidewater' },
   { id: 'd5', company: 'Northwind Media', title: 'Group Product Manager, Ads', url: 'https://example.com/jobs/5', where: 'Remote (scope unclear)', flags: ["remote, but the allowed countries aren't stated"], comp: { min: 210000, max: 250000, currency: 'USD' }, atsPostedAt: iso(400), firstSeenAt: iso(390) },
 ];
 
@@ -59,6 +63,7 @@ export class DemoSource implements DataSource {
       matches: MATCHES,
       feedback: { ...this.feedback },
       lastRun: { ...this.run },
+      discoverSources: ['General Catalyst', 'Khosla Ventures', 'Accel', 'Thrive Capital', 'Lux Capital'].map((name) => ({ name, host: '', lastOkAt: iso(2) })),
     };
   }
 

@@ -9,7 +9,7 @@ import { DemoSource } from './lib/demo';
 import { ago } from '../shared/format';
 import { SupabaseSource, type DataSource } from './lib/source';
 import { supabase, supabaseConfigured } from './lib/supabase';
-import type { Match, Snapshot, Verdict } from './lib/types';
+import type { Match, NewWatch, Snapshot, Verdict } from './lib/types';
 
 const POLL_MS = 5000;
 const CHECK_TIMEOUT_MS = 6 * 60_000;
@@ -133,6 +133,14 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
     }
   };
 
+  const addWatch = async (w: NewWatch) => {
+    await source.addWatch(w);
+    await reload();
+    if (w.ats === 'none') return flash(`Added ${w.name} (not monitored).`);
+    flash(`Added ${w.name}. Checking it now; you'll get an email listing any matching roles already open.`);
+    void runCheck(`${w.name} is checked and watched hourly from now on.`);
+  };
+
   if (!snap) {
     return (
       <div className="min-h-screen bg-paper px-4 py-10 text-sm text-muted">
@@ -222,6 +230,12 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
           <Settings
             profile={snap.profile}
             nearMisses={snap.matches.filter((m) => m.nearMiss)}
+            discoverSources={snap.discoverSources}
+            onDigest={async (every) => {
+              await source.saveProfile({ digest_every: every });
+              await reload();
+              flash(every === 'never' ? 'No Discover emails; the tab still updates.' : `Discover digest: ${every === 'biweekly' ? 'every 2 weeks' : every}.`);
+            }}
             onPause={async (paused) => {
               await source.saveProfile({ alerts_paused: paused });
               await reload(); // the banner and the card show the new state
@@ -248,6 +262,15 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             onVerdicts={onVerdicts}
             needsFilters={needsFilters}
             onOpenSettings={() => setView('settings')}
+            discoverSources={snap.discoverSources}
+            digestEvery={snap.profile.digest_every}
+            onWatch={async (w) => {
+              try {
+                await addWatch(w);
+              } catch (e) {
+                fail(e);
+              }
+            }}
           />
           <aside>
             <Companies
@@ -258,13 +281,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
                 await reload();
                 void runCheck(`${w.name}'s filters are applied.`);
               }}
-              onAdd={async (w) => {
-                await source.addWatch(w);
-                await reload();
-                if (w.ats === 'none') return flash(`Added ${w.name} (not monitored).`);
-                flash(`Added ${w.name}. Checking it now; you'll get an email listing any matching roles already open.`);
-                void runCheck(`${w.name} is checked and watched hourly from now on.`);
-              }}
+              onAdd={addWatch}
               onChangeBoard={async (w, ats, board) => {
                 await source.changeBoard(w.id, ats, board);
                 await reload();

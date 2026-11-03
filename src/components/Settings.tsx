@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { money } from '../../shared/format';
-import type { Criteria, Match, Profile } from '../lib/types';
+import type { Criteria, DigestEvery, DiscoverSource, Match, Profile } from '../lib/types';
 import { Button, Field, Input, SectionHeader } from './ui';
 
 // Lists are edited as comma-separated text: easy to read, easy to paste.
@@ -32,8 +32,10 @@ function missedPlaces(nearMisses: Match[]): [string, number][] {
 }
 
 /** Name, alert email, filters, pausing, and deleting the account. Saving re-checks right away. */
-export default function Settings({ profile, nearMisses, onSave, onPause, onDelete, onCancel }: {
+export default function Settings({ profile, nearMisses, discoverSources, onSave, onPause, onDigest, onDelete, onCancel }: {
   profile: Profile;
+  discoverSources: DiscoverSource[];
+  onDigest: (every: DigestEvery) => Promise<void>;
   /** Roles the current filters hid for one reason; used to show what each filter is costing. */
   nearMisses: Match[];
   onSave: (patch: Pick<Profile, 'name' | 'email' | 'criteria'>) => Promise<void>;
@@ -107,6 +109,7 @@ export default function Settings({ profile, nearMisses, onSave, onPause, onDelet
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       <PauseCard paused={profile.alerts_paused} onPause={onPause} />
+      <DigestCard every={profile.digest_every} sources={discoverSources} onChange={onDigest} />
 
       <div className={card}>
         <SectionHeader title="You" />
@@ -255,6 +258,49 @@ function PauseCard({ paused, onPause }: { paused: boolean; onPause: (p: boolean)
       <Button variant={paused ? 'primary' : 'secondary'} onClick={toggle} disabled={busy}>
         {paused ? 'Resume alerts' : 'Pause alerts'}
       </Button>
+    </div>
+  );
+}
+
+const DIGEST_OPTIONS: { value: DigestEvery; label: string }[] = [
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'biweekly', label: 'Every 2 weeks' },
+  { value: 'never', label: 'Never (just the Discover tab)' },
+];
+
+function DigestCard({ every, sources, onChange }: { every: DigestEvery; sources: DiscoverSource[]; onChange: (e: DigestEvery) => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const change = async (e: DigestEvery) => {
+    setBusy(true);
+    try {
+      await onChange(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="rounded-xl border border-line bg-white p-5">
+      <SectionHeader title="Discover digest" />
+      <p className="mb-3 text-sm text-muted">
+        Roles that pass all your filters at companies you don't watch, found on VC portfolio job boards
+        {sources.length ? ` (${sources.map((s) => s.name).join(', ')})` : ''}. They're never emailed one by one; a digest sums up
+        what's new.
+      </p>
+      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="How often">
+        {DIGEST_OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            role="radio"
+            aria-checked={every === o.value}
+            disabled={busy}
+            onClick={() => every !== o.value && change(o.value)}
+            className={`rounded-full border px-3 py-1 text-sm font-medium ${every === o.value ? 'border-forest bg-emerald-50 text-forest' : 'border-line-strong text-ink-soft hover:bg-paper'}`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
