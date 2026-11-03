@@ -147,6 +147,41 @@ ${list}
   return { to, subject: `JobSnipe is watching: ${matches.length} open matches`, html, text };
 }
 
+const EVERY = { daily: "today", weekly: "this week", biweekly: "in the last two weeks", never: "" } as const;
+
+/** The Discover digest: roles that pass all your filters at companies you don't watch. */
+export function digestEmail(
+  to: string,
+  items: { j: { company: string; title: string; url: string; locations: string[]; comp?: Posting["comp"]; postedAt?: string; via: string[] }; r: FilterResult }[],
+  every: keyof typeof EVERY,
+  now: Date,
+  max = 30,
+): Email {
+  const shown = items.slice(0, max);
+  const more = items.length - shown.length;
+  const asPosting = (j: (typeof items)[number]["j"]) => ({ ...j, atsPostedAt: j.postedAt }) as unknown as Posting;
+  const cards = shown
+    .map(({ j, r }) =>
+      card(asPosting(j), r, now).replace(
+        /<\/div>\s*$/,
+        `<div style="margin-top:6px;font-size:12px;color:${C.muted}">via ${esc(j.via.join(", "))} · not on your list</div></div>`,
+      ),
+    )
+    .join("");
+  const moreLine = more > 0 ? `<p style="font-size:14px;color:${C.muted}">And ${more} more on the <a href="${SITE}" style="color:${C.forest}">Discover tab</a>.</p>` : "";
+  const html = layout(
+    `${items.length} new role${items.length === 1 ? "" : "s"} to discover`,
+    `<p style="font-size:14px;margin:0 0 14px">New ${EVERY[every]} on VC portfolio job boards: these pass all your filters, at companies you don't watch. Like one? Open JobSnipe and use <b>Watch this company</b> to hear about its new roles within the hour.</p>
+${cards}${moreLine}`,
+  );
+  const text = [
+    `${items.length} new roles that pass your filters, at companies you don't watch:`,
+    ...shown.map(({ j, r }) => `${textLine(asPosting(j), r, now)}\n  via ${j.via.join(", ")}`),
+    ...(more > 0 ? [`And ${more} more: ${SITE}`] : []),
+  ].join("\n");
+  return { to, subject: `Discover: ${items.length} new role${items.length === 1 ? "" : "s"} at companies you don't watch`, html, text };
+}
+
 export function healthEmail(to: string, failing: { name: string; error: string; since?: string }[]): Email {
   const items = failing
     .map((f) => `<li style="margin:0 0 6px"><b>${esc(f.name)}</b>: ${esc(f.error)}${f.since ? ` <span style="color:${C.muted}">(last OK ${esc(f.since)})</span>` : ""}</li>`)

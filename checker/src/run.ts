@@ -1,6 +1,7 @@
 import { boardUrl, compFetchers, fetchers } from "./ats/index.js";
 import { baselineEmail, healthEmail, matchEmail, type BaselineCompany, type Mailer } from "./email.js";
 import { withWatchFilters } from "../../shared/criteria.js";
+import { runDiscover, type SearchSource } from "./discover/run.js";
 import { evaluate, nearMiss, titleCheck, toFilters } from "./filters.js";
 import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "./store.js";
 import type { Ats, BoardResult, Filters, FilterResult, Posting } from "./types.js";
@@ -23,6 +24,8 @@ export interface RunOptions {
   /** Pay for one posting, for boards whose list leaves it out. */
   fetchComp?: FetchComp;
   log?: (msg: string) => void;
+  /** Read one Discover board (tests pass a stand-in). */
+  searchDiscover?: SearchSource;
 }
 
 async function mapLimit<T>(items: T[], limit: number, fn: (t: T) => Promise<void>): Promise<void> {
@@ -264,6 +267,16 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         }
       }
       if (allSent) for (const c of failing) await store.updateCompany(c.id, { failure_alert_sent: true });
+    }
+
+    // 5. Discover: VC portfolio boards, every few hours, summed up in a digest. A problem there never
+    //    holds up your own list, which is done by now.
+    try {
+      const d = await runDiscover({ store, mailer, people, watches, companies, now, search: opts.searchDiscover, log, redact });
+      summary.alerts_sent += d.digests;
+      summary.errors.push(...d.errors);
+    } catch (e) {
+      summary.errors.push(`discover failed: ${redact(msg(e))}`);
     }
 
     await store.prune(now);

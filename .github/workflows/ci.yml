@@ -19,7 +19,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: node scripts/probe-boards.mjs portfoliojobs.a16z.com jobs.sequoiacap.com jobs.generalcatalyst.com jobs.khoslaventures.com jobs.kleinerperkins.com jobs.accel.com jobs.lsvp.com jobs.thrivecap.com jobs.bvp.com jobs.felicis.com jobs.luxcapital.com
+      - run: npx tsx scripts/probe-getro.ts
       - run: npm test
       # Type-checks the page, checker and shared code, then builds the page.
       - run: npm run build
