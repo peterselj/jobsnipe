@@ -1,44 +1,37 @@
-// Temporary: learn how the VC job boards serve their jobs (run in CI, which can reach them).
-const hosts = process.argv.slice(2);
+// Temporary: learn how Getro boards search (run in CI, which can reach them).
 const UA = { 'user-agent': 'Mozilla/5.0 (JobSnipe probe)' };
-const cut = (s, n = 600) => (typeof s === 'string' ? s : JSON.stringify(s)).slice(0, n);
-for (const host of hosts) {
+const cut = (s, n = 800) => (typeof s === 'string' ? s : JSON.stringify(s)).slice(0, n);
+for (const host of ['jobs.generalcatalyst.com', 'portfoliojobs.a16z.com']) {
   console.log(`\n===== ${host}`);
-  try {
-    const r = await fetch(`https://${host}/jobs`, { headers: UA, redirect: 'follow' });
-    const html = await r.text();
-    console.log('page', r.status, r.url, html.length, 'bytes');
-    for (const k of ['getro', 'consider', 'pallet', '__NEXT_DATA__', 'api.getro.com', 'cdn.getro.com']) console.log(' has', k, html.includes(k));
-    const m = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
-    if (m) {
-      const d = JSON.parse(m[1]);
-      const pp = d.props?.pageProps ?? {};
-      console.log(' pageProps keys', Object.keys(pp));
-      const st = pp.initialState ?? pp;
-      console.log(' state keys', Object.keys(st));
-      if (st.network) console.log(' network', cut({ id: st.network.id, slug: st.network.slug, name: st.network.name, domain: st.network.domain, url: st.network.url }));
-      const jobs = st.jobs ?? pp.jobs;
-      if (jobs) {
-        console.log(' jobs keys', Object.keys(jobs));
-        const list = jobs.found ?? jobs.list ?? jobs.items ?? jobs.results;
-        if (Array.isArray(list) && list[0]) console.log(' first job', cut(list[0], 1500));
-        console.log(' total', jobs.total ?? jobs.count ?? jobs.totalCount);
-      }
-      const id = st.network?.id;
-      if (id) {
-        for (const body of [{ hitsPerPage: 3, page: 0, filters: {}, query: 'product manager' }]) {
-          const a = await fetch(`https://api.getro.com/api/v2/collections/${id}/search/jobs`, {
-            method: 'POST', headers: { ...UA, 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify(body),
-          });
-          const t = await a.text();
-          console.log(' api', a.status, a.headers.get('etag'), cut(t, 2500));
-        }
-      }
-    } else {
-      const apis = [...new Set(html.match(/https?:\/\/[a-z0-9.-]*(api|consider|getro)[a-z0-9.-]*\/[^"' )]{0,80}/gi) ?? [])].slice(0, 10);
-      console.log(' api-ish urls', apis);
-    }
-  } catch (e) {
-    console.log(' error', e.message);
+  const r = await fetch(`https://${host}/jobs`, { headers: UA });
+  const html = await r.text();
+  console.log('page', r.status, html.length, 'getro', html.includes('getro'), 'consider', html.includes('consider'));
+  const m = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!m) { console.log(cut(html.replace(/\s+/g, ' '), 1500)); continue; }
+  const d = JSON.parse(m[1]);
+  const n = d.props.pageProps.network;
+  console.log('network keys', Object.keys(n ?? {}));
+  console.log('network', cut({ id: n?.id, slug: n?.slug, name: n?.name, url: n?.url, domain: n?.domain }));
+  const api = d.props.pageProps.initialState?.api;
+  console.log('api state', cut(api, 400));
+  const urls = [...new Set(html.match(/https?:\/\/[a-z0-9.-]*getro[a-z0-9.-]*\/[a-z0-9/_.-]{0,60}/gi) ?? [])].slice(0, 15);
+  console.log('getro urls', urls);
+  const id = n?.id;
+  const tries = [
+    ['POST', `https://api.getro.com/api/v2/collections/${id}/search/jobs`, { hitsPerPage: 3, page: 0, filters: { page: 0 }, query: 'product manager' }],
+    ['GET', `https://api.getro.com/api/v2/collections/${id}/search/jobs?hitsPerPage=3&page=0&query=product%20manager`],
+    ['POST', `https://api.getro.com/v2/collections/${id}/search/jobs`, { hitsPerPage: 3, page: 0, query: 'product manager' }],
+  ];
+  for (const [method, url, body] of tries) {
+    try {
+      const a = await fetch(url, { method, headers: { ...UA, 'content-type': 'application/json', accept: 'application/json', origin: `https://${host}`, referer: `https://${host}/jobs` }, body: body && JSON.stringify(body) });
+      const t = await a.text();
+      console.log('try', method, url, a.status, cut(t, 1800));
+    } catch (e) { console.log('try', url, 'error', e.message); }
   }
+  // What the page does when you search: query string form.
+  const q = await fetch(`https://${host}/jobs?q=product%20manager`, { headers: UA });
+  const qh = await q.text();
+  const qm = qh.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (qm) { const j = JSON.parse(qm[1]).props.pageProps.initialState.jobs; console.log('?q= total', j.total, 'found', j.found.length, j.found.slice(0, 3).map((x) => x.title)); }
 }
