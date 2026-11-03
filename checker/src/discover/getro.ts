@@ -20,9 +20,11 @@ interface GetroJob {
 }
 
 const HEADERS = { "user-agent": "JobSnipe/0.1 (personal job alerts)", accept: "application/json" };
-/** Results per request, and a cap on pages per search so one board can't stall a run. */
-export const PAGE_SIZE = 100;
-export const MAX_PAGES = 30;
+/** Getro returns at most 20 results per request; a cap on pages keeps one board from stalling a run. */
+export const PAGE_SIZE = 20;
+export const MAX_PAGES = 50;
+/** Results come best match first; after this many pages with no title that fits anyone, stop. */
+const STOP_AFTER_MISSES = 2;
 
 async function call(url: string, init: RequestInit = {}): Promise<Response> {
   const res = await fetch(url, { ...init, signal: AbortSignal.timeout(30_000), headers: { ...HEADERS, ...init.headers } });
@@ -61,21 +63,30 @@ export function toDiscoverJob(j: GetroJob, via: string): DiscoverJob | undefined
   };
 }
 
-/** Every job on a board matching any of the searches (e.g. "product manager"). */
-export async function searchGetro(collectionId: string, queries: string[], via: string): Promise<DiscoverJob[]> {
+/**
+ * Jobs on a board for each search (e.g. "product manager"). Getro's search is loose (it also finds
+ * "product marketing" and anything mentioning products), so `fits` says which titles are worth
+ * keeping, and paging stops once the results stop fitting.
+ */
+export async function searchGetro(collectionId: string, queries: string[], via: string, fits: (title: string) => boolean = () => true): Promise<DiscoverJob[]> {
   const found = new Map<string, DiscoverJob>();
   for (const query of queries) {
-    for (let page = 0; page < MAX_PAGES; page++) {
+    for (let page = 0, misses = 0; page < MAX_PAGES && misses < STOP_AFTER_MISSES; page++) {
       const res = await call(`https://api.getro.com/api/v2/collections/${encodeURIComponent(collectionId)}/search/jobs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ hitsPerPage: PAGE_SIZE, page, filters: { page }, query }),
       });
       const jobs: GetroJob[] = (await res.json())?.results?.jobs ?? [];
+      let fit = 0;
       for (const j of jobs) {
         const d = toDiscoverJob(j, via);
-        if (d) found.set(d.id, d);
+        if (d && fits(d.title)) {
+          found.set(d.id, d);
+          fit++;
+        }
       }
+      misses = fit ? 0 : misses + 1;
       if (jobs.length < PAGE_SIZE) break;
     }
   }

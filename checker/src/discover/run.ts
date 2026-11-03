@@ -22,11 +22,11 @@ export const DIGEST_MAX = 30;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 
-export type SearchSource = (s: DiscoverSourceRow, queries: string[]) => Promise<{ jobs: DiscoverJob[]; collectionId?: string }>;
+export type SearchSource = (s: DiscoverSourceRow, queries: string[], fits: (title: string) => boolean) => Promise<{ jobs: DiscoverJob[]; collectionId?: string }>;
 
-const searchSource: SearchSource = async (s, queries) => {
+const searchSource: SearchSource = async (s, queries, fits) => {
   const collectionId = s.collection_id ?? (await getroCollectionId(s.host));
-  return { jobs: await searchGetro(collectionId, queries, s.name), collectionId };
+  return { jobs: await searchGetro(collectionId, queries, s.name, fits), collectionId };
 };
 
 /** "Acme AI, Inc." and "acme" are the same company for "is it already on my list?". */
@@ -95,8 +95,9 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
     const found = new Map<string, DiscoverJob>();
     for (const s of due) {
       try {
-        const { jobs, collectionId } = await search(s, queries);
-        const fit = jobs.filter((j) => searchers.some((p) => !titleCheck(j.title, filters.get(p.id)!)));
+        const fits = (title: string) => searchers.some((p) => !titleCheck(title, filters.get(p.id)!));
+        const { jobs, collectionId } = await search(s, queries, fits);
+        const fit = jobs.filter((j) => fits(j.title));
         for (const j of fit) {
           const seen = found.get(j.id);
           found.set(j.id, seen ? { ...seen, via: [...new Set([...seen.via, ...j.via])] } : j);
