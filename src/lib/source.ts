@@ -13,7 +13,7 @@ export interface DataSource {
   removeWatch(watchId: number): Promise<void>;
   /** null = back to the usual filters for this company. */
   setWatchFilters(watchId: number, filters: WatchFilters | null): Promise<void>;
-  saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused'>>): Promise<void>;
+  saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused' | 'digest_every'>>): Promise<void>;
   /** Permanently delete the signed-in account and everything about it. */
   deleteAccount(): Promise<void>;
   /** Starts a check; returns the time to wait for a run after. */
@@ -44,8 +44,8 @@ export class SupabaseSource implements DataSource {
   constructor(private db: SupabaseClient, private userId: string) {}
 
   async load(): Promise<Snapshot> {
-    const [profile, watches, matches, verdicts, run] = await Promise.all([
-      this.db.from('profiles').select('id, name, email, criteria, alert_mode, alerts_paused').eq('id', this.userId).single(),
+    const [profile, watches, matches, verdicts, run, discover, sources] = await Promise.all([
+      this.db.from('profiles').select('id, name, email, criteria, alert_mode, alerts_paused, digest_every').eq('id', this.userId).single(),
       this.db
         .from('watches')
         .select('id, name, careers_url, note, filters, company_id, companies(ats, board, last_checked_at, last_error, consecutive_failures, open_postings)')
@@ -56,11 +56,17 @@ export class SupabaseSource implements DataSource {
         .limit(2000),
       this.db.from('verdicts').select('*').limit(5000),
       this.latestRun(),
+      this.db
+        .from('discover_matches')
+        .select('where_label, flags, discover_postings(id, company, title, url, posted_at, comp_min, comp_max, comp_currency, ats, board, via, first_seen_at)')
+        .limit(2000),
+      this.db.from('discover_sources').select('name, host, last_ok_at, last_error, enabled').order('id'),
     ]);
     fail('Loading your profile', profile.error);
     fail('Loading companies', watches.error);
     fail('Loading matches', matches.error);
     fail('Loading feedback', verdicts.error);
+    fail('Loading Discover', discover.error ?? sources.error);
 
     const nameByCompany = new Map<number, string>();
     const ws: Watch[] = (watches.data ?? []).map((w: any) => {
@@ -101,6 +107,27 @@ export class SupabaseSource implements DataSource {
       })
       .sort((a, b) => b.firstSeenAt.localeCompare(a.firstSeenAt) || (b.atsPostedAt ?? '').localeCompare(a.atsPostedAt ?? ''));
 
+    const found: Match[] = (discover.data ?? [])
+      .filter((m: any) => m.discover_postings)
+      .map((m: any) => {
+        const p = m.discover_postings;
+        return {
+          id: p.id,
+          company: p.company,
+          title: p.title,
+          url: p.url,
+          where: m.where_label ?? undefined,
+          flags: m.flags ?? [],
+          comp: p.comp_min != null && p.comp_max != null ? { min: p.comp_min, max: p.comp_max, currency: p.comp_currency } : undefined,
+          atsPostedAt: p.posted_at ?? undefined,
+          firstSeenAt: p.first_seen_at,
+          via: p.via ?? [],
+          ats: p.ats ?? undefined,
+          board: p.board ?? undefined,
+        };
+      })
+      .sort((a, b) => (b.atsPostedAt ?? b.firstSeenAt).localeCompare(a.atsPostedAt ?? a.firstSeenAt));
+
     const feedback: Feedback = {};
     for (const v of verdicts.data ?? []) {
       feedback[v.posting_id] = {
@@ -115,9 +142,12 @@ export class SupabaseSource implements DataSource {
     }
 
     return {
-      profile: { ...profile.data, criteria: profile.data.criteria ?? {}, alerts_paused: !!profile.data.alerts_paused },
+      profile: { ...profile.data, criteria: profile.data.criteria ?? {}, alerts_paused: !!profile.data.alerts_paused, digest_every: profile.data.digest_every ?? 'daily' },
       watches: ws,
-      matches: ms,
+      matches: [...ms, ...found],
+      discoverSources: (sources.data ?? [])
+        .filter((s: any) => s.enabled)
+        .map((s: any) => ({ name: s.name, host: s.host, lastOkAt: s.last_ok_at ?? undefined, lastError: s.last_error ?? undefined })),
       feedback,
       lastRun: run,
     };
@@ -178,7 +208,7 @@ export class SupabaseSource implements DataSource {
     fail('Saving company filters', error);
   }
 
-  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused'>>) {
+  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused' | 'digest_every'>>) {
     const { error } = await this.db.from('profiles').update(patch).eq('id', this.userId);
     fail('Saving settings', error);
   }

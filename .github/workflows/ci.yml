@@ -19,7 +19,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx tsx scripts/probe-getro.ts
       - run: npm test
       # Type-checks the page, checker and shared code, then builds the page.
       - run: npm run build

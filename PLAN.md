@@ -71,6 +71,12 @@ Places they can surface, and what's built:
   created (Waabi's Creative Director: created Oct 29, published Nov 2, emailed within the hour but
   labelled "4d ago"). A board date earlier than our last look is replaced by when we first saw the
   job, for the label and the age limit. Checks stay hourly.
+- **Built (Nov 3): Discover, first source.** VC portfolio boards on Getro (General Catalyst, Khosla,
+  Accel, Thrive, Lux): read every 4 hours, searched by your job titles (about 2,250 product roles
+  across the five), matched against all your filters, minus companies on your list. Discover tab with
+  a chip per VC, "+ Watch company" (straight onto your list when the job links to a board we read,
+  otherwise the finder opens), and a digest email: daily, weekly, every 2 weeks or never. Sequoia,
+  a16z, Kleiner, Lightspeed, Bessemer and Felicis run on Consider: next.
 - **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
   proposals from feedback; "Send to JobBoard".
 - **Text alerts** for people who prefer them (ntfy or Twilio).
