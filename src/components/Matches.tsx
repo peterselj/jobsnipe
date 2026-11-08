@@ -27,6 +27,8 @@ interface Props {
 }
 
 const DAY = 86_400_000;
+/** The Archive shows roles archived this recently; older ones fold away behind "Show older". */
+const ARCHIVE_RECENT_DAYS = 30;
 
 /**
  * Matches as an inbox: everything not yet decided sits in Inbox until marked Interested or Not for
@@ -38,6 +40,7 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
   const [folder, setFolder] = useState<Folder>('inbox');
   const [missFilter, setMissFilter] = useState<MissCheck | null>(null);
   const [viaFilter, setViaFilter] = useState<string | null>(null);
+  const [showOlder, setShowOlder] = useState(false);
   const open = new Map(matches.map((m) => [m.id, m]));
 
   const inbox = matches.filter((m) => !m.nearMiss && !m.via && !feedback[m.id]);
@@ -59,9 +62,21 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
     not_for_me: fromVerdicts((f) => f.verdict === 'not_for_me' && !f.archivedAt, (f) => f.at),
     near: missFilter ? near.filter((m) => m.nearMiss === missFilter) : near,
     discover: viaFilter ? discover.filter((m) => m.via!.includes(viaFilter)) : discover,
-    archive: fromVerdicts((f) => !!f.archivedAt, (f) => f.archivedAt!),
+    archive: [],
   };
+  // The Archive shows the last month; older roles fold away behind "Show older". Deleted ones are gone
+  // from every list (but stay remembered, so they never come back to the inbox).
+  const archived = fromVerdicts((f) => !!f.archivedAt && !f.deletedAt, (f) => f.archivedAt!);
+  const recentCutoff = Date.now() - ARCHIVE_RECENT_DAYS * DAY;
+  const olderCount = archived.filter((m) => Date.parse(feedback[m.id].archivedAt!) < recentCutoff).length;
+  lists.archive = showOlder ? archived : archived.filter((m) => Date.parse(feedback[m.id].archivedAt!) >= recentCutoff);
   const shown = lists[folder];
+
+  const emptyArchive = () => {
+    if (!confirm(`Delete all ${archived.length} archived roles? They're gone for good, and still never come back to your inbox.`)) return;
+    const at = new Date().toISOString();
+    onVerdicts(archived.map((m) => ({ m, v: { ...feedback[m.id], deletedAt: at } })));
+  };
 
   // Archive everything in the current view, keeping each role's decision.
   const archiveAll = () => {
@@ -103,7 +118,7 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
           >
             {t.label}
             <span className={`rounded-full px-1.5 py-px font-mono text-[10px] ${t.key === 'inbox' && inbox.length ? 'bg-forest text-white' : 'bg-slate-200 text-ink-soft'}`}>
-              {t.key === 'near' ? near.length : t.key === 'discover' ? discover.length : lists[t.key].length}
+              {t.key === 'near' ? near.length : t.key === 'discover' ? discover.length : t.key === 'archive' ? archived.length : lists[t.key].length}
             </span>
           </button>
         ))}
@@ -162,14 +177,29 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
           <Button size="sm" variant="ghost" onClick={archiveAll}>Archive all {shown.length} →</Button>
         </div>
       )}
+      {folder === 'archive' && archived.length > 0 && (
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-xs text-muted">
+            {showOlder ? 'Everything you\'ve archived, newest first.' : `Archived in the last ${ARCHIVE_RECENT_DAYS} days.`}
+          </p>
+          <Button size="sm" variant="ghost" onClick={emptyArchive}>Empty archive</Button>
+        </div>
+      )}
 
-      {shown.length === 0 ? (
+      {shown.length === 0 && !(folder === 'archive' && olderCount) ? (
         <Empty folder={folder} needsFilters={needsFilters} onOpenSettings={onOpenSettings} />
       ) : (
         <div className="space-y-2.5">
           {shown.map((m) => (
             <MatchCard key={m.id} m={m} verdict={feedback[m.id]} onVerdict={onVerdict} onWatch={onWatch} />
           ))}
+        </div>
+      )}
+      {folder === 'archive' && olderCount > 0 && (
+        <div className="mt-3 text-center">
+          <button className="text-sm font-semibold text-forest underline-offset-2 hover:underline" onClick={() => setShowOlder(!showOlder)}>
+            {showOlder ? `Hide the ${olderCount} older than ${ARCHIVE_RECENT_DAYS} days` : `Show older (${olderCount})`}
+          </button>
         </div>
       )}
     </section>
@@ -192,7 +222,7 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
     not_for_me: ['Nothing dismissed', 'Roles you mark Not for me are kept here, out of your way.'],
     near: ['No near misses', 'Roles your filters hid for just one reason (pay, place, level or age) show up here.'],
     discover: ['Nothing to discover yet', 'Roles that pass all your filters at companies you don\'t watch show up here, from VC portfolio job boards checked every 4 hours.'],
-    archive: ['Archive is empty', "Done with a role (applied, moved it to JobBoard, or it's just stale)? Archive it. It stays here and never comes back to your inbox."],
+    archive: ['Archive is empty', "Done with a role (applied, moved it to JobBoard, or it's just stale)? Archive it. It never comes back to your inbox, and you can delete it from here when you want it gone."],
   }[folder];
   return (
     <div className="rounded-xl border border-dashed border-line-strong bg-white/60 px-5 py-10 text-center">
@@ -226,6 +256,8 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
   const archive = () => onVerdict(m, { ...base, ...verdict, archivedAt: new Date().toISOString() });
   // Restore: back to its folder, or to the inbox if it was archived without a decision.
   const restore = () => onVerdict(m, verdict?.verdict ? { ...verdict, archivedAt: undefined } : null);
+  // Delete from the Archive: hidden for good, but remembered so the job never returns to the inbox.
+  const remove = () => verdict && onVerdict(m, { ...verdict, deletedAt: new Date().toISOString() });
   const status = archived
     ? verdict?.verdict === 'interested' ? '★ Was Interested' : verdict?.verdict === 'not_for_me' ? 'Was Not for me' : 'Archived from inbox'
     : undefined;
@@ -271,7 +303,10 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
 
         <div className="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
           {archived ? (
-            <Button size="sm" variant="ghost" onClick={restore}>↩ Restore</Button>
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="ghost" onClick={restore}>↩ Restore</Button>
+              <Button size="sm" variant="ghost" onClick={remove} title="Gone for good (it still won't come back to your inbox)">Delete</Button>
+            </div>
           ) : verdict ? (
             <>
               <Button size="sm" onClick={archive} title="Done with this role: move it to the Archive">Archive →</Button>

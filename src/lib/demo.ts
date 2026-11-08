@@ -52,7 +52,11 @@ export class DemoSource implements DataSource {
   kind = 'demo' as const;
   private profile = structuredClone(PROFILE);
   private watches = structuredClone(WATCHES);
-  private feedback: Snapshot['feedback'] = {};
+  private feedback: Snapshot['feedback'] = {
+    a1: { verdict: 'not_for_me', reason: 'too early-stage', at: iso(24 * 5), archivedAt: iso(24 * 3), company: 'Pinecrest Analytics', title: 'Senior Product Manager, Data Platform', url: 'https://example.com/jobs/a1' },
+    a2: { verdict: 'interested', at: iso(24 * 50), archivedAt: iso(24 * 45), company: 'Harbor Freightworks', title: 'Lead Product Manager, Logistics', url: 'https://example.com/jobs/a2' },
+    a3: { at: iso(24 * 70), archivedAt: iso(24 * 70), company: 'Oakline Bank', title: 'Senior Product Manager, Lending', url: 'https://example.com/jobs/a3' },
+  };
   private run: Run = { startedAt: iso(0.4), finishedAt: iso(0.39), trigger: 'schedule', errors: 0 };
   private nextId = 100;
 

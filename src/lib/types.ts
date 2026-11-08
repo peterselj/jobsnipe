@@ -76,6 +76,8 @@ export interface Verdict {
   at: string;
   /** Set once you're done with the role; it then lives in the Archive. */
   archivedAt?: string;
+  /** Deleted from the Archive: hidden everywhere, but still remembered so the job never comes back. */
+  deletedAt?: string;
   // Kept so a verdict still reads sensibly after the posting closes.
   company: string;
   title: string;

@@ -239,4 +239,24 @@ describe('database', () => {
     await expect(as(JOSH, `select add_watch('Other', 'smartrecruiters', 'acme')`)).rejects.toThrow(/companies_ats_check/);
     await db.exec(`delete from watches where company_id in (select id from companies where ats = 'workday'); delete from companies where ats = 'workday';`);
   });
+
+  it('0009: deleting from the Archive keeps a hidden note, cleared only once the job is gone', async () => {
+    const old = `now() - interval '100 days'`;
+    await db.exec(`
+      insert into verdicts (profile_id, posting_id, archived_at, deleted_at, title) values
+        ('${JOSH}', 'gone:1', ${old}, ${old}, 'closed long ago'),
+        ('${JOSH}', 'recent:1', now(), now() - interval '10 days', 'deleted recently'),
+        ('${JOSH}', 'greenhouse:acme:1', ${old}, ${old}, 'still posted'),
+        ('${JOSH}', 'kept:1', ${old}, null, 'archived, not deleted')
+      on conflict (profile_id, posting_id) do update set archived_at = excluded.archived_at, deleted_at = excluded.deleted_at, title = excluded.title;
+    `);
+    // People mark their own roles deleted from the page; nobody else's.
+    await as(JOSH, `update verdicts set deleted_at = now() - interval '10 days' where posting_id = 'recent:1'`);
+    await as(JAKE, `update verdicts set deleted_at = null where posting_id = 'recent:1'`); // RLS: matches no rows
+    expect((await db.query(`select deleted_at is not null as d from verdicts where posting_id = 'recent:1'`)).rows).toEqual([{ d: true }]);
+    await db.exec('select prune_deleted_verdicts()');
+    expect((await db.query<{ posting_id: string }>(`select posting_id from verdicts where posting_id in ('gone:1', 'recent:1', 'greenhouse:acme:1', 'kept:1') order by posting_id`)).rows.map((r) => r.posting_id))
+      .toEqual(['greenhouse:acme:1', 'kept:1', 'recent:1']);
+    await expect(as(JOSH, 'select prune_deleted_verdicts()')).rejects.toThrow(/permission denied/);
+  });
 });
