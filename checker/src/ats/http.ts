@@ -19,13 +19,30 @@ export async function getJsonIfChanged<T>(
   etag?: string,
   timeoutMs = 30_000,
 ): Promise<{ unchanged?: true; data?: T; etag?: string }> {
+  return requestJson<T>(url, { etag, timeoutMs });
+}
+
+/** POST a JSON body and read JSON back (Workday's job search works this way), same retries as getJson. */
+export async function postJson<T>(url: string, body: unknown, timeoutMs = 30_000): Promise<T> {
+  const r = await requestJson<T>(url, { body, timeoutMs });
+  return r.data!;
+}
+
+async function requestJson<T>(
+  url: string,
+  { etag, body, timeoutMs }: { etag?: string; body?: unknown; timeoutMs: number },
+): Promise<{ unchanged?: true; data?: T; etag?: string }> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(timeoutMs),
+        method: body === undefined ? "GET" : "POST",
+        body: body === undefined ? undefined : JSON.stringify(body),
         headers: {
           "user-agent": "JobSnipe/0.1 (personal job alerts)",
+          accept: "application/json",
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
           // With a tag, fetch() would otherwise add "Cache-Control: no-cache", and some boards (Lever)
           // then send everything again instead of answering 304.
           ...(etag ? { "if-none-match": etag, "cache-control": "max-age=0" } : {}),

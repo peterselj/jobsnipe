@@ -39,6 +39,8 @@ export interface KnownPosting {
   closed: boolean;
   comp?: Posting["comp"];
   compChecked: boolean;
+  locations?: string[];
+  workplace?: Posting["workplace"];
 }
 
 export interface PostingChanges {
@@ -47,8 +49,8 @@ export interface PostingChanges {
   reopened: string[];
   /** No longer on the board. */
   closed: string[];
-  /** Pay just looked up for postings already stored. */
-  priced: { id: string; comp?: Posting["comp"] }[];
+  /** Details just looked up for postings already stored: pay, and places when the list lacked them. */
+  priced: { id: string; comp?: Posting["comp"]; locations?: string[]; workplace?: Posting["workplace"] }[];
 }
 
 export interface MatchRow {
@@ -167,10 +169,10 @@ export class SupabaseStore implements Store {
 
   async knownPostings(company: CompanyRow) {
     const rows = await this.all<any>("load postings", (a, b) =>
-      this.db.from("postings").select("id, first_seen_at, ats_posted_at, closed_at, comp_min, comp_max, comp_currency, comp_checked").eq("company_id", company.id).order("id").range(a, b),
+      this.db.from("postings").select("id, first_seen_at, ats_posted_at, closed_at, comp_min, comp_max, comp_currency, comp_checked, locations, workplace").eq("company_id", company.id).order("id").range(a, b),
     );
     return new Map<string, KnownPosting>(
-      rows.map((r) => [r.id, { firstSeenAt: r.first_seen_at, atsPostedAt: r.ats_posted_at ?? undefined, closed: r.closed_at !== null, comp: compOf(r), compChecked: r.comp_checked }]),
+      rows.map((r) => [r.id, { firstSeenAt: r.first_seen_at, atsPostedAt: r.ats_posted_at ?? undefined, closed: r.closed_at !== null, comp: compOf(r), compChecked: r.comp_checked, locations: r.locations ?? [], workplace: r.workplace ?? undefined }]),
     );
   }
 
@@ -184,9 +186,10 @@ export class SupabaseStore implements Store {
         this.check(await this.db.from("postings").update({ closed_at }).in("id", ids.slice(i, i + 100)), "mark postings");
       }
     }
-    for (const { id, comp } of ch.priced) {
+    for (const { id, comp, locations, workplace } of ch.priced) {
       const pay = { comp_min: comp ? Math.round(comp.min) : null, comp_max: comp ? Math.round(comp.max) : null, comp_currency: comp?.currency ?? null };
-      this.check(await this.db.from("postings").update({ ...pay, comp_checked: true }).eq("id", id), "save pay");
+      const places = locations ? { locations, workplace: workplace ?? null } : {};
+      this.check(await this.db.from("postings").update({ ...pay, ...places, comp_checked: true }).eq("id", id), "save pay");
     }
   }
 

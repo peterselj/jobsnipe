@@ -1,6 +1,35 @@
 // Job-board helpers shared by the page (src/) and the checker (checker/).
 
-export type Ats = 'greenhouse' | 'lever' | 'ashby';
+export type Ats = 'greenhouse' | 'lever' | 'ashby' | 'workday';
+
+/**
+ * A Workday board is stored as "host/tenant/site", e.g.
+ * "nvidia.wd5.myworkdayjobs.com/nvidia/NVIDIAExternalCareerSite": unlike the other boards it can't
+ * be found from a company name, only from one of its links.
+ */
+export interface WorkdayBoard {
+  host: string;
+  tenant: string;
+  site: string;
+}
+
+const WORKDAY_JOBS_HOST = /^[a-z0-9-]+(\.wd\d{1,3})?\.myworkdayjobs\.com$/;
+const WORKDAY_SITE_HOST = /^wd\d{1,3}\.myworkdaysite\.com$/;
+const WORKDAY_NAME = /^[A-Za-z0-9_.-]+$/;
+
+/** Only real Workday hosts, so a stored board can never point the checker anywhere else. */
+export function parseWorkdayBoard(board: string): WorkdayBoard | undefined {
+  const [host, tenant, site, ...rest] = board.split('/');
+  if (rest.length || !host || !tenant || !site) return undefined;
+  if (!WORKDAY_JOBS_HOST.test(host) && !WORKDAY_SITE_HOST.test(host)) return undefined;
+  if (!WORKDAY_NAME.test(tenant) || !WORKDAY_NAME.test(site)) return undefined;
+  return { host, tenant, site };
+}
+
+/** Where Workday's own job-search page for a board lives. */
+export function workdaySiteUrl(b: WorkdayBoard): string {
+  return WORKDAY_SITE_HOST.test(b.host) ? `https://${b.host}/recruiting/${b.tenant}/${b.site}` : `https://${b.host}/${b.site}`;
+}
 
 export function boardUrl(ats: Ats, board: string): string {
   switch (ats) {
@@ -10,19 +39,39 @@ export function boardUrl(ats: Ats, board: string): string {
       return `https://jobs.lever.co/${board}`;
     case 'ashby':
       return `https://jobs.ashbyhq.com/${board}`;
+    case 'workday': {
+      const b = parseWorkdayBoard(board);
+      return b ? workdaySiteUrl(b) : `https://${board.split('/')[0]}`;
+    }
   }
 }
 
-export const ATS_LABEL: Record<Ats, string> = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby' };
+/** A board's name for showing to people (Workday's stored form is long). */
+export function boardLabel(ats: Ats, board: string): string {
+  if (ats !== 'workday') return board;
+  const b = parseWorkdayBoard(board);
+  return b ? `${b.tenant} / ${b.site}` : board;
+}
 
-/** Recognize a pasted job-board or job-posting link. */
-export function parseBoardUrl(input: string): { ats: Ats; board: string } | undefined {
-  let url: URL;
+export const ATS_LABEL: Record<Ats, string> = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday' };
+
+/** The boards a company name can be looked up on (Workday needs a link). */
+export const GUESSABLE_ATS: Ats[] = ['greenhouse', 'lever', 'ashby'];
+
+function toUrl(input: string): URL | undefined {
+  const s = input.trim();
+  if (!s.includes('://') && !/^[\w-]+(\.[\w-]+)+(\/|$)/.test(s)) return undefined;
   try {
-    url = new URL(input.includes('://') ? input.trim() : `https://${input.trim()}`);
+    return new URL(s.includes('://') ? s : `https://${s}`);
   } catch {
     return undefined;
   }
+}
+
+/** Recognize a pasted job-board or job-posting link. */
+export function parseBoardUrl(input: string): { ats: Ats; board: string } | undefined {
+  const url = toUrl(input);
+  if (!url) return undefined;
   const parts = url.pathname.split('/').filter(Boolean);
   const host = url.hostname.toLowerCase();
   if (host.endsWith('greenhouse.io')) {
@@ -38,10 +87,56 @@ export function parseBoardUrl(input: string): { ats: Ats; board: string } | unde
   if (host === 'api.ashbyhq.com' && parts[0] === 'posting-api') {
     return parts[2] ? { ats: 'ashby', board: parts[2] } : undefined;
   }
-  return undefined;
+  return parseWorkdayUrl(host, parts);
 }
 
-export const looksLikeUrl = (s: string) => /^(https?:\/\/)?[\w-]+(\.[\w-]+)+\//i.test(s.trim());
+// Workday links put a language first sometimes: /en-US/NVIDIAExternalCareerSite/job/...
+const LOCALE = /^[a-z]{2}(-[a-z]{2})?$/i;
+
+function parseWorkdayUrl(host: string, parts: string[]): { ats: Ats; board: string } | undefined {
+  let tenant: string | undefined;
+  let site: string | undefined;
+  if (parts[0] === 'wday' && parts[1] === 'cxs') {
+    [tenant, site] = [parts[2], parts[3]];
+  } else {
+    const rest = LOCALE.test(parts[0] ?? '') ? parts.slice(1) : parts;
+    if (WORKDAY_JOBS_HOST.test(host)) [tenant, site] = [host.split('.')[0], rest[0]];
+    else if (WORKDAY_SITE_HOST.test(host) && rest[0] === 'recruiting') [tenant, site] = [rest[1], rest[2]];
+  }
+  if (!tenant || !site) return undefined;
+  const board = `${host}/${tenant}/${site}`;
+  return parseWorkdayBoard(board) ? { ats: 'workday', board } : undefined;
+}
+
+/**
+ * A company's own careers site often sits in front of one of these boards (DoorDash's is Greenhouse,
+ * under "doordashusa"). Its address still names the company: careers.doordash.com and
+ * careersatdoordash.com both give "doordash".
+ */
+export function companyFromSiteUrl(input: string): string | undefined {
+  const url = toUrl(input);
+  if (!url) return undefined;
+  const labels = url.hostname.toLowerCase().replace(/^www\./, '').split('.');
+  if (labels.length < 2) return undefined;
+  let i = labels.length - 2;
+  // acme.co.uk, acme.com.au
+  if (i > 0 && /^(co|com|org|net|ac)$/.test(labels[i]) && labels[labels.length - 1].length === 2) i--;
+  const name = labels[i]
+    .replace(/^(careers?|jobs?|work|join)(at|with)(?=[a-z0-9]{3})|^(careers|jobs)-?(?=[a-z0-9]{3})/, '')
+    .replace(/-?(careers?|jobs)$/, '');
+  return name.length >= 2 ? name : undefined;
+}
+
+/** The job a careers-site link points at, when it says (?gh_jid=123 is Greenhouse's, ?ashby_jid= Ashby's). */
+export function jobIdFromUrl(input: string): { ats: Ats; id: string } | undefined {
+  const url = toUrl(input);
+  const gh = url?.searchParams.get('gh_jid');
+  if (gh) return { ats: 'greenhouse', id: gh };
+  const ashby = url?.searchParams.get('ashby_jid');
+  return ashby ? { ats: 'ashby', id: ashby } : undefined;
+}
+
+export const looksLikeUrl = (s: string) => toUrl(s) !== undefined;
 
 /** Board slugs worth trying for a name: "Acme Robotics Group" -> acmeroboticsgroup, acme-robotics-group, arg, ... */
 export function slugCandidates(name: string): string[] {
@@ -59,7 +154,7 @@ export function slugCandidates(name: string): string[] {
     bases.add(w.join('-'));
   }
   const out = new Set<string>(bases);
-  for (const b of bases) for (const suffix of ['inc', 'ai', 'hq', 'jobs', 'careers']) out.add(b + suffix);
+  for (const b of bases) for (const suffix of ['inc', 'ai', 'hq', 'jobs', 'careers', 'usa', 'us']) out.add(b + suffix);
   if (noThe.length > 1) out.add(noThe.map((w) => w[0]).join(''));
   return [...out];
 }

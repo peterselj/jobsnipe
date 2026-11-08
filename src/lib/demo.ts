@@ -103,7 +103,8 @@ export class DemoSource implements DataSource {
     const pending = this.watches.filter((w) => w.status === 'pending' && w.ats !== 'none');
     void Promise.all(
       pending.map(async (w) => {
-        const hit = await probeBoard(w.ats as Ats, w.board!);
+        // The page can't read Workday boards (only the checker can), so the demo takes them on trust.
+        const hit = w.ats === 'workday' ? { jobs: undefined } : await probeBoard(w.ats as Ats, w.board!);
         Object.assign(w, hit
           ? { status: 'ok', openPostings: hit.jobs, lastCheckedAt: new Date().toISOString(), lastError: undefined }
           : { status: 'failing', lastCheckedAt: new Date().toISOString(), lastError: "Couldn't read that board" });

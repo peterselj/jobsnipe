@@ -41,14 +41,16 @@ export class MemoryStore implements Store {
   }
   async knownPostings(c: CompanyRow) {
     const out = new Map<string, KnownPosting>();
-    for (const [id, p] of this.postings) if (p.companyId === c.id) out.set(id, { firstSeenAt: p.firstSeenAt, atsPostedAt: p.atsPostedAt, closed: p.closed, comp: p.comp, compChecked: p.compChecked !== false });
+    for (const [id, p] of this.postings) if (p.companyId === c.id) out.set(id, { firstSeenAt: p.firstSeenAt, atsPostedAt: p.atsPostedAt, closed: p.closed, comp: p.comp, compChecked: p.compChecked !== false, locations: p.locations, workplace: p.workplace });
     return out;
   }
   async applyPostingChanges(c: CompanyRow, ch: PostingChanges, at: string) {
     for (const p of ch.added) this.postings.set(p.id, { ...p, companyId: c.id, firstSeenAt: at, closed: false });
     for (const id of ch.reopened) this.postings.get(id)!.closed = false;
     for (const id of ch.closed) this.postings.get(id)!.closed = true;
-    for (const { id, comp } of ch.priced) Object.assign(this.postings.get(id)!, { comp, compChecked: true });
+    for (const { id, comp, locations, workplace } of ch.priced) {
+      Object.assign(this.postings.get(id)!, { comp, compChecked: true }, locations ? { locations, workplace } : {});
+    }
     this.postingWrites += ch.added.length + ch.reopened.length + ch.closed.length + ch.priced.length;
   }
   async openPostings(c: CompanyRow) {

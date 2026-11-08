@@ -1,7 +1,8 @@
-import type { Ats, BoardResult, Posting } from "../types.js";
+import type { Ats, BoardResult, Details, Posting } from "../types.js";
 import { fetchAshby } from "./ashby.js";
-import { fetchGreenhouse, greenhouseComp } from "./greenhouse.js";
+import { fetchGreenhouse, greenhouseDetails } from "./greenhouse.js";
 import { fetchLever } from "./lever.js";
+import { fetchWorkday, workdayDetails } from "./workday.js";
 
 export { boardUrl } from "../../../shared/ats.js";
 
@@ -9,10 +10,15 @@ export const fetchers: Record<Ats, (board: string, company: string, etag?: strin
   greenhouse: fetchGreenhouse,
   lever: fetchLever,
   ashby: fetchAshby,
+  workday: (board, company, etag) => fetchWorkday(board, company, etag),
 };
 
-/** Boards whose list leaves out pay; their pay is fetched per posting, only when it could matter. */
-export const compFetchers: Partial<Record<Ats, (board: string, p: Posting) => Promise<Posting["comp"]>>> = {
-  greenhouse: greenhouseComp,
+/**
+ * Boards whose list leaves out pay (and, on Workday, places); those are read from each posting's
+ * own page, only when it could matter.
+ */
+export const detailFetchers: Partial<Record<Ats, (board: string, p: Posting) => Promise<Details>>> = {
+  greenhouse: greenhouseDetails,
+  workday: workdayDetails,
 };
 
