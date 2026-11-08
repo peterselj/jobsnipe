@@ -86,6 +86,9 @@ Places they can surface, and what's built:
 - **More boards, next:** SmartRecruiters, Workable, Recruitee and BambooHR all have public job lists
   like Greenhouse's. Truly custom career sites (Google, Apple, Amazon, Meta) each need their own reader.
   The checker could also look inside a "not monitored" company's careers page for a board it links to.
+- **Built (Nov 8): a tidier Archive.** Shows the last 30 days ("Show older" for the rest); Delete on
+  each archived role and Empty archive. Deleting keeps a hidden note so the job never comes back to
+  the inbox; notes go 90 days after deletion once the job is no longer posted.
 - **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
   proposals from feedback; "Send to JobBoard".
 - **Text alerts** for people who prefer them (ntfy or Twilio).

@@ -259,6 +259,7 @@ export class SupabaseStore implements Store {
     this.check(await this.db.from("check_requests").delete().lt("requested_at", before(7)), "prune requests");
     this.check(await this.db.rpc("prune_unwatched_boards"), "prune unwatched boards");
     this.check(await this.db.from("discover_postings").delete().lt("last_seen_at", before(30)), "prune discover postings");
+    this.check(await this.db.rpc("prune_deleted_verdicts"), "prune deleted archive notes");
   }
 
   async discoverSources() {
