@@ -1,4 +1,4 @@
-import type { BoardResult, Posting } from "../types.js";
+import type { BoardResult, Details, Posting } from "../types.js";
 import { htmlToText, parseCompText } from "../normalize.js";
 import { getJson, getJsonIfChanged } from "./http.js";
 
@@ -45,8 +45,8 @@ export async function fetchGreenhouse(board: string, company: string, etag?: str
 }
 
 /** Pay range from one posting's description. */
-export async function greenhouseComp(board: string, p: Posting): Promise<Posting["comp"]> {
+export async function greenhouseDetails(board: string, p: Posting): Promise<Details> {
   const id = p.id.split(":").pop()!;
   const j = await getJson<GhJob>(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs/${encodeURIComponent(id)}`);
-  return j.content ? parseCompText(htmlToText(j.content)) : undefined;
+  return { comp: j.content ? parseCompText(htmlToText(j.content)) : undefined };
 }

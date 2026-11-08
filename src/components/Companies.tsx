@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ATS_LABEL, boardUrl } from '../lib/ats';
+import { ATS_LABEL, boardLabel, boardUrl } from '../lib/ats';
 import { ago } from '../../shared/format';
 import { describeWatchFilters } from '../../shared/criteria';
 import type { Ats, Criteria, NewWatch, Watch, WatchFilters } from '../lib/types';
@@ -104,7 +104,7 @@ function CompanyRow({ w, onFix, onTune, onRemove }: { w: Watch; onFix: () => voi
           <span className="text-sm font-semibold">{w.name}</span>
           {link && (
             <a href={link} target="_blank" rel="noreferrer" className="truncate font-mono text-[11px] text-muted hover:text-forest hover:underline">
-              {w.ats === 'none' ? 'careers page' : `${ATS_LABEL[w.ats]} · ${w.board}`}
+              {w.ats === 'none' ? 'careers page' : `${ATS_LABEL[w.ats]} · ${boardLabel(w.ats, w.board ?? '')}`}
             </a>
           )}
         </div>

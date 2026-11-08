@@ -37,10 +37,22 @@ export interface Posting {
   comp?: { min: number; max: number; currency: string };
   /** False when the board's list leaves pay out and we haven't fetched this posting's details yet. */
   compChecked?: boolean;
+  /** The list's places are only a stand-in ("3 locations"); the job's details have the real ones. */
+  locationsFromDetails?: boolean;
 }
 
-/** One board check: its postings and version tag, or "unchanged since that tag". */
-export type BoardResult = { unchanged: true } | { unchanged?: false; postings: Posting[]; etag?: string };
+/** What a posting's own page adds, for boards whose list leaves things out. */
+export interface Details {
+  comp?: Posting["comp"];
+  locations?: string[];
+  workplace?: Posting["workplace"];
+}
+
+/**
+ * One board check: its postings and version tag, or "unchanged since that tag". `partial` means
+ * the board was too big to read in full, so postings missing from it may still be open.
+ */
+export type BoardResult = { unchanged: true } | { unchanged?: false; postings: Posting[]; etag?: string; partial?: boolean };
 
 export type Check = "title" | "seniority" | "location" | "pay" | "age";
 

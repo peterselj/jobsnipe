@@ -11,7 +11,8 @@ that fits is posted, so you can be one of the first applicants. Sign in with jus
   **Not for me** (with an optional reason) until the inbox reads "No new roles!". Interested roles
   stay listed even after the posting closes.
 - **Companies:** add one by name or by pasting any of its job links (it searches Greenhouse, Lever
-  and Ashby), fix or remove it, and see whether each board is being read OK.
+  and Ashby, and takes Workday links; a link to a company's own careers site is tried too, since many
+  sit in front of one of these), fix or remove it, and see whether each board is being read OK.
 - **Near misses:** roles in your job family that missed by just one filter (pay, place or level), with
   what each filter is hiding shown in Settings, so you can tell when to loosen one.
 - **Settings:** job titles to include and exclude, senior-and-up, places, remote countries, pay floor,
@@ -25,7 +26,7 @@ that fits is posted, so you can be one of the first applicants. Sign in with jus
  page (GitHub Pages) ──sign-in, read/write own data──▶ Supabase (Postgres + Auth)
                                                           │  hourly pg_cron, or "Check now"
                                                           ▼
-                       GitHub Action "Check job boards" (checker/) ──▶ Greenhouse / Lever / Ashby
+                       GitHub Action "Check job boards" (checker/) ──▶ Greenhouse / Lever / Ashby / Workday
                                                           │
                                                           └──▶ Brevo ──▶ alert emails
 ```
