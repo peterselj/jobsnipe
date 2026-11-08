@@ -1,7 +1,7 @@
 import { boardUrl, detailFetchers, fetchers } from "./ats/index.js";
 import { baselineEmail, healthEmail, matchEmail, type BaselineCompany, type Mailer } from "./email.js";
 import { withWatchFilters } from "../../shared/criteria.js";
-import { runDiscover, type SearchSource } from "./discover/run.js";
+import { runDiscover, type LookupPay, type SearchSource } from "./discover/run.js";
 import { evaluate, nearMiss, titleCheck, toFilters } from "./filters.js";
 import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "./store.js";
 import type { Ats, BoardResult, Details, Filters, FilterResult, Posting } from "./types.js";
@@ -26,6 +26,8 @@ export interface RunOptions {
   log?: (msg: string) => void;
   /** Read one Discover board (tests pass a stand-in). */
   searchDiscover?: SearchSource;
+  /** Look up a Discover job's pay on its company's own board (tests pass a stand-in). */
+  lookupDiscoverPay?: LookupPay;
 }
 
 async function mapLimit<T>(items: T[], limit: number, fn: (t: T) => Promise<void>): Promise<void> {
@@ -291,7 +293,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     // 5. Discover: VC portfolio boards, every few hours, summed up in a digest. A problem there never
     //    holds up your own list, which is done by now.
     try {
-      const d = await runDiscover({ store, mailer, people, watches, companies, now, search: opts.searchDiscover, log, redact });
+      const d = await runDiscover({ store, mailer, people, watches, companies, now, search: opts.searchDiscover, lookupPay: opts.lookupDiscoverPay, log, redact });
       summary.alerts_sent += d.digests;
       summary.errors.push(...d.errors);
     } catch (e) {

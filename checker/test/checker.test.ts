@@ -3,6 +3,7 @@ import { makeMailer, type Email, type Mailer } from "../src/email.js";
 import { evaluate, toFilters } from "../src/filters.js";
 import { htmlToText, parseCompText } from "../src/normalize.js";
 import { runCheck as realRunCheck, type RunOptions } from "../src/run.js";
+import { HttpError } from "../src/ats/http.js";
 import type { DiscoverJob } from "../src/discover/types.js";
 import type { Criteria, Posting } from "../src/types.js";
 import { MemoryStore } from "./memoryStore.js";
@@ -470,6 +471,47 @@ describe("discover", () => {
     await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(2) });
     expect(sent.filter((e) => e.subject.startsWith("Discover"))).toHaveLength(0);
     expect(store.people_[0].last_digest_at).toBe(at(2).toISOString());
+  });
+
+  it("looks pay up on the company's own board when the VC board leaves it out, once per job", async () => {
+    const { store, sent, mailer, searchDiscover, setBoards } = discoverSetup();
+    setBoards({
+      "Board A": [
+        dj("d:7", { company: "Imprint", comp: undefined, ats: "ashby", board: "imprint", url: "https://jobs.ashbyhq.com/imprint/7" }),
+        dj("d:8", { company: "Lowpay", comp: undefined, ats: "lever", board: "lowpay", url: "https://jobs.lever.co/lowpay/8" }),
+        dj("d:9", { company: "Gone", comp: undefined, ats: "greenhouse", board: "gone", url: "https://job-boards.greenhouse.io/gone/jobs/9" }),
+      ],
+    });
+    const asked: string[] = [];
+    const lookupPay = async (j: DiscoverJob) => {
+      asked.push(j.id);
+      if (j.id === "d:9") throw new HttpError(404, "https://x");
+      return j.id === "d:7" ? { min: 190000, max: 210000, currency: "USD" } : { min: 90000, max: 120000, currency: "USD" };
+    };
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, lookupDiscoverPay: lookupPay, now: at(1) });
+    expect(store.discover.get("d:7")).toMatchObject({ comp: { min: 190000, max: 210000 }, compChecked: true });
+    expect(store.discover.get("d:9")!.compChecked).toBe(true); // gone from its board: not tried again
+    // Lowpay's pay is now known and under the floor, so it's out; Gone still has no pay listed, so it
+    // shows like any role without a range.
+    expect(store.discoverMatches.get(JOSH)!.map((m) => m.posting_id)).toEqual(["d:7", "d:9"]);
+    expect(sent.find((e) => e.subject.startsWith("Discover"))!.text).toMatch(/Imprint[\s\S]*\$190K/);
+
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, lookupDiscoverPay: lookupPay, now: at(2) });
+    expect(asked.sort()).toEqual(["d:7", "d:8", "d:9"]);
+  });
+
+  it("shows a job listed twice under different companies once, keeping the copy with pay", async () => {
+    const { store, mailer, searchDiscover, setBoards } = discoverSetup();
+    const title = "Senior Product Manager, Slack Platform";
+    setBoards({
+      "Board A": [
+        dj("d:10", { company: "Airkit", title, comp: undefined, compChecked: true, url: "https://careers.salesforce.com/jobs/10" }),
+        dj("d:11", { company: "Slack", title, url: "https://careers.salesforce.com/jobs/11" }),
+        dj("d:12", { company: "Slack", title, locations: ["Toronto, ON, Canada"], url: "https://careers.salesforce.com/jobs/12" }), // another place: its own job
+      ],
+    });
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(1) });
+    expect(store.discoverMatches.get(JOSH)!.map((m) => m.posting_id).sort()).toEqual(["d:11", "d:12"]);
   });
 
   it("a broken board is reported without holding anything up", async () => {
