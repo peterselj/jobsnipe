@@ -107,6 +107,8 @@ export interface Store {
   openDiscoverPostings(since: string): Promise<DiscoverJob[]>;
   syncDiscoverMatches(profileId: string, rows: DiscoverMatchRow[]): Promise<void>;
   markDigested(profileId: string, at: string): Promise<void>;
+  /** Pay looked up on the company's own board (undefined: it lists none). */
+  saveDiscoverPay(rows: { id: string; comp?: Posting["comp"] }[]): Promise<void>;
 }
 
 const DAY = 86_400_000;
@@ -288,12 +290,19 @@ export class SupabaseStore implements Store {
     return rows.map((r): DiscoverJob => ({
       id: r.id, company: r.company, title: r.title, locations: r.locations ?? [], workplace: r.workplace ?? undefined, url: r.url,
       postedAt: r.posted_at ?? undefined, comp: compOf(r), ats: r.ats ?? undefined, board: r.board ?? undefined,
-      via: r.via ?? [], firstSeenAt: r.first_seen_at,
+      via: r.via ?? [], firstSeenAt: r.first_seen_at, compChecked: !!r.comp_checked,
     }));
   }
 
   async syncDiscoverMatches(profileId: string, rows: DiscoverMatchRow[]) {
     this.check(await this.db.rpc("sync_discover_matches", { p_profile: profileId, p_rows: rows }), "save discover matches");
+  }
+
+  async saveDiscoverPay(rows: { id: string; comp?: Posting["comp"] }[]) {
+    for (const { id, comp } of rows) {
+      const pay = { comp_min: comp ? Math.round(comp.min) : null, comp_max: comp ? Math.round(comp.max) : null, comp_currency: comp?.currency ?? null };
+      this.check(await this.db.from("discover_postings").update({ ...pay, comp_checked: true }).eq("id", id), "save discover pay");
+    }
   }
 
   async markDigested(profileId: string, at: string) {

@@ -1,8 +1,12 @@
-import { parseBoardUrl } from "../../../shared/ats.js";
+import { linkOwner, parseBoardUrl } from "../../../shared/ats.js";
+import { HttpError } from "../ats/http.js";
+import { fetchers } from "../ats/index.js";
+import { greenhouseDetails } from "../ats/greenhouse.js";
+import { workdayDetails } from "../ats/workday.js";
 import { digestEmail, type Mailer } from "../email.js";
 import { evaluate, titleCheck, toFilters } from "../filters.js";
 import type { CompanyRow, Store, WatchRow } from "../store.js";
-import type { Filters, Person, Posting } from "../types.js";
+import type { BoardResult, Filters, Person, Posting } from "../types.js";
 import { getroCollectionId, searchGetro } from "./getro.js";
 import type { DiscoverJob, DiscoverSourceRow } from "./types.js";
 
@@ -18,6 +22,9 @@ export const OPEN_FOR_DAYS = 2;
 const DIGEST_DAYS = { daily: 1, weekly: 7, biweekly: 14 } as const;
 /** Digest lists stop here; the rest are on the page. */
 export const DIGEST_MAX = 30;
+
+/** Pay lookups on companies' own boards per run, so a big first read can't stall the check. */
+export const MAX_PAY_LOOKUPS = 40;
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -35,6 +42,26 @@ export function companyKey(name: string): string {
   const drop = new Set(["inc", "llc", "ltd", "corp", "co", "the", "ai", "labs", "hq", "technologies", "technology"]);
   const kept = words.filter((w) => !drop.has(w));
   return (kept.length ? kept : words).join("");
+}
+
+/**
+ * VC boards sometimes list the same job twice under different companies (Salesforce's Slack jobs
+ * also show up as "Airkit", a company it bought). Same title, same place, links to the same company:
+ * keep one, the one with pay if either has it, listed by every board that had either.
+ */
+function dedupe(rows: { j: DiscoverJob; r: { where?: string } }[]) {
+  const keep = new Map<string, { j: DiscoverJob; r: { where?: string } }>();
+  for (const row of rows) {
+    const key = `${row.j.title.trim().toLowerCase()}|${row.r.where ?? ""}|${linkOwner(row.j.url) ?? row.j.url}`;
+    const seen = keep.get(key);
+    if (!seen) keep.set(key, row);
+    else {
+      const [winner, loser] = !seen.j.comp && row.j.comp ? [row, seen] : [seen, row];
+      winner.j = { ...winner.j, via: [...new Set([...winner.j.via, ...loser.j.via])] };
+      keep.set(key, winner);
+    }
+  }
+  rows.splice(0, rows.length, ...keep.values());
 }
 
 /** Already watched: the job's link is on one of your boards, or the company has the same name. */
@@ -57,6 +84,39 @@ const asPosting = (j: DiscoverJob): Posting => ({
   compChecked: true,
 });
 
+export type LookupPay = (j: DiscoverJob) => Promise<Posting["comp"]>;
+
+/** The job's id on its own board, from its link (".../jobs/123", "?gh_jid=123", or the last part). */
+function jobIdFromLink(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    const gh = u.searchParams.get("gh_jid") ?? u.pathname.match(/\/jobs\/(\d+)/)?.[1];
+    return gh ?? u.pathname.split("/").filter(Boolean).pop();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Pay from the company's own board. Greenhouse and Workday are read one job at a time; Ashby and
+ * Lever only as a whole board, read once per run however many jobs need it.
+ */
+function payLookup(): LookupPay {
+  const boards = new Map<string, Promise<BoardResult>>();
+  return async (j) => {
+    if (!j.ats || !j.board) return undefined;
+    const p = asPosting(j);
+    const id = jobIdFromLink(j.url);
+    if (j.ats === "greenhouse") return id ? (await greenhouseDetails(j.board, { ...p, id: `greenhouse:${j.board}:${id}` })).comp : undefined;
+    if (j.ats === "workday") return (await workdayDetails(j.board, p)).comp;
+    const key = `${j.ats}:${j.board}`;
+    if (!boards.has(key)) boards.set(key, fetchers[j.ats](j.board, j.company));
+    const res = await boards.get(key)!;
+    if (res.unchanged) return undefined;
+    return res.postings.find((x) => x.url === j.url || (id && x.id.endsWith(`:${id}`)))?.comp;
+  };
+}
+
 export function digestDue(person: Pick<Person, "digest_every" | "last_digest_at">, now: Date): boolean {
   const every = person.digest_every ?? "daily";
   if (every === "never") return false;
@@ -73,6 +133,7 @@ export interface DiscoverOptions {
   companies: Map<number, CompanyRow>;
   now: Date;
   search?: SearchSource;
+  lookupPay?: LookupPay;
   log?: (msg: string) => void;
   redact: (s: string) => string;
 }
@@ -118,8 +179,29 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
     if (found.size) await store.saveDiscoverPostings([...found.values()], iso);
   }
 
-  // 2. Per person: Discover matches (all filters pass, company not on their list), and the digest.
   const open = await store.openDiscoverPostings(new Date(now.getTime() - OPEN_FOR_DAYS * DAY).toISOString());
+
+  // 2. VC boards often leave pay out when the company's own board lists it: look it up there, once
+  //    per job, for jobs whose title fits someone.
+  const fitsAnyone = (title: string) => searchers.some((p) => !titleCheck(title, filters.get(p.id)!));
+  const needPay = open.filter((j) => !j.comp && !j.compChecked && j.ats && j.board && fitsAnyone(j.title)).slice(0, MAX_PAY_LOOKUPS);
+  if (needPay.length) {
+    const lookup = o.lookupPay ?? payLookup();
+    const priced: { id: string; comp?: Posting["comp"] }[] = [];
+    for (const j of needPay) {
+      try {
+        j.comp = await lookup(j);
+        priced.push({ id: j.id, comp: j.comp });
+      } catch (e) {
+        // A job that's gone from its board won't come back; anything else is tried again next run.
+        if (e instanceof HttpError && e.status === 404) priced.push({ id: j.id });
+      }
+    }
+    if (priced.length) await store.saveDiscoverPay(priced);
+    log(`  discover pay: ${priced.filter((x) => x.comp).length} of ${needPay.length} found on the company's own board`);
+  }
+
+  // 3. Per person: Discover matches (all filters pass, company not on their list), and the digest.
   for (const person of o.people) {
     const f = filters.get(person.id)!;
     const mine = o.watches.filter((w) => w.profile_id === person.id);
@@ -128,12 +210,13 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
       return c ? [`${c.ats}:${c.board}`] : [];
     }));
     const names = new Set(mine.map((w) => companyKey(w.name)));
-    const passing = !f.titles.include.length
+    const passing: { j: DiscoverJob; r: ReturnType<typeof evaluate> }[] = !f.titles.include.length
       ? []
       : open
           .filter((j) => !onList(j, boards, names))
           .map((j) => ({ j, r: evaluate(asPosting(j), f, now) }))
           .filter(({ r }) => r.pass);
+    dedupe(passing);
     await store.syncDiscoverMatches(person.id, passing.map(({ j, r }) => ({ posting_id: j.id, where_label: r.where ?? null, flags: r.flags })));
 
     if (!digestDue(person, now)) continue;

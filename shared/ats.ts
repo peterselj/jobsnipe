@@ -159,3 +159,19 @@ export function slugCandidates(name: string): string[] {
   return [...out];
 }
 
+
+/**
+ * Who a job link really belongs to, as a short name: the board name on Greenhouse, Lever and Ashby,
+ * the company on a Workday site, otherwise the site's own name ("careers.salesforce.com" → salesforce).
+ * VC boards sometimes file a job under the wrong company (e.g. one a bigger company bought).
+ */
+export function linkOwner(url: string): string | undefined {
+  const b = parseBoardUrl(url);
+  if (b) return b.ats === 'workday' ? b.board.split('.')[0] : b.board;
+  try {
+    const labels = new URL(url).hostname.toLowerCase().replace(/^www\./, '').split('.');
+    return labels.length >= 2 ? labels[labels.length - 2] : labels[0];
+  } catch {
+    return undefined;
+  }
+}

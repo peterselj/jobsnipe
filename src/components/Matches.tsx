@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { linkOwner } from '../../shared/ats';
 import { ago, money } from '../../shared/format';
 import type { DigestEvery, DiscoverSource, Feedback, Match, NewWatch, Verdict } from '../lib/types';
 import FindBoard from './FindBoard';
@@ -27,6 +28,31 @@ interface Props {
 }
 
 const DAY = 86_400_000;
+
+const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** When a VC board files a job under one company but its link goes to another (e.g. one that bought it). */
+function linksElsewhere(m: Match): string | undefined {
+  const owner = m.url ? linkOwner(m.url) : undefined;
+  if (!owner) return undefined;
+  const a = squash(owner);
+  const b = squash(m.company);
+  return a && b && !a.includes(b) && !b.includes(a) ? owner : undefined;
+}
+
+/** The filter bar: place, minimum pay (in thousands, or a full number), keywords (-word hides). */
+function passes(f: { place: string; minPay: string; keyword: string; payOnly: boolean }) {
+  const n = Number(f.minPay.replace(/[^\d.]/g, ''));
+  const floor = n ? (n < 1000 ? n * 1000 : n) : 0;
+  const words = f.keyword.toLowerCase().split(/\s+/).filter(Boolean);
+  return (m: Match) => {
+    if (f.place === 'Remote*' ? !m.where?.startsWith('Remote') : f.place && m.where !== f.place) return false;
+    if (f.payOnly && !m.comp) return false;
+    if (floor && m.comp && m.comp.max < floor) return false;
+    const text = `${m.title} ${m.company}`.toLowerCase();
+    return words.every((w) => (w.startsWith('-') ? w.length === 1 || !text.includes(w.slice(1)) : text.includes(w)));
+  };
+}
 /** The Archive shows roles archived this recently; older ones fold away behind "Show older". */
 const ARCHIVE_RECENT_DAYS = 30;
 
@@ -70,7 +96,16 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
   const recentCutoff = Date.now() - ARCHIVE_RECENT_DAYS * DAY;
   const olderCount = archived.filter((m) => Date.parse(feedback[m.id].archivedAt!) < recentCutoff).length;
   lists.archive = showOlder ? archived : archived.filter((m) => Date.parse(feedback[m.id].archivedAt!) >= recentCutoff);
-  const shown = lists[folder];
+  // Filters on what's in front of you (not the Archive): place, minimum pay, keywords.
+  const [place, setPlace] = useState('');
+  const [minPay, setMinPay] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [payOnly, setPayOnly] = useState(false);
+  const filtering = folder !== 'archive';
+  const all = lists[folder];
+  const shown = filtering ? all.filter(passes({ place, minPay, keyword, payOnly })) : all;
+  const places = [...new Set(all.map((m) => m.where).filter((w): w is string => !!w))].sort();
+  const active = filtering && !!(place || minPay.trim() || keyword.trim() || payOnly);
 
   const emptyArchive = () => {
     if (!confirm(`Delete all ${archived.length} archived roles? They're gone for good, and still never come back to your inbox.`)) return;
@@ -83,7 +118,8 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
     const where =
       tabs.find((t) => t.key === folder)!.label.replace('★ ', '') +
       (folder === 'near' && missFilter ? ` (${MISS_LABEL[missFilter]})` : '') +
-      (folder === 'discover' && viaFilter ? ` (via ${viaFilter})` : '');
+      (folder === 'discover' && viaFilter ? ` (via ${viaFilter})` : '') +
+      (active ? ' that match your filters' : '');
     if (!confirm(`Archive all ${shown.length} roles in ${where}? You can restore any of them from the Archive.`)) return;
     const at = new Date().toISOString();
     onVerdicts(
@@ -144,6 +180,50 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
               ),
             )}
           </div>
+        </div>
+      )}
+
+      {filtering && all.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <select
+            aria-label="Place"
+            value={place}
+            onChange={(e) => setPlace(e.target.value)}
+            className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-emerald-600 focus:outline-none"
+          >
+            <option value="">All places</option>
+            {places.some((p) => p.startsWith('Remote')) && <option value="Remote*">All remote</option>}
+            {places.map((p) => (
+              <option key={p} value={p}>{p} · {all.filter((m) => m.where === p).length}</option>
+            ))}
+          </select>
+          <input
+            aria-label="Minimum pay in thousands"
+            inputMode="numeric"
+            value={minPay}
+            onChange={(e) => setMinPay(e.target.value)}
+            placeholder="Min pay ($K)"
+            className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-emerald-600 focus:outline-none"
+          />
+          <input
+            aria-label="Keywords"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="Keywords (-word to hide)"
+            className="min-w-0 flex-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-emerald-600 focus:outline-none sm:max-w-[240px]"
+          />
+          <label className="flex items-center gap-1.5 text-ink-soft">
+            <input type="checkbox" checked={payOnly} onChange={(e) => setPayOnly(e.target.checked)} className="h-4 w-4 accent-[var(--color-forest)]" />
+            Pay listed
+          </label>
+          {active && (
+            <span className="text-xs text-muted">
+              Showing {shown.length} of {all.length} ·{' '}
+              <button className="font-semibold text-forest underline-offset-2 hover:underline" onClick={() => { setPlace(''); setMinPay(''); setKeyword(''); setPayOnly(false); }}>
+                Clear
+              </button>
+            </span>
+          )}
         </div>
       )}
 
@@ -297,7 +377,12 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
             </div>
           )}
           {m.flags.length > 0 && <div className="mt-1 text-[13px] text-gold">⚑ {m.flags.join(' · ')}</div>}
-          {m.via && !verdict && <div className="mt-1 text-[12px] text-muted">via {m.via.join(', ')} · not on your list</div>}
+          {m.via && !verdict && (
+            <div className="mt-1 text-[12px] text-muted">
+              via {m.via.join(', ')} · not on your list
+              {linksElsewhere(m) && <> · <span className="text-gold">links to {linksElsewhere(m)}</span></>}
+            </div>
+          )}
           {verdict?.reason && <div className="mt-1 text-[13px] text-muted">“{verdict.reason}”</div>}
         </div>
 

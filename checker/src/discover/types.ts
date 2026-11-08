@@ -16,6 +16,8 @@ export interface DiscoverJob {
   board?: string;
   /** Which VC boards list it. */
   via: string[];
+  /** Pay has been looked up on the company's own board (whether or not it had any). */
+  compChecked?: boolean;
   firstSeenAt?: string;
 }
 

@@ -89,6 +89,11 @@ Places they can surface, and what's built:
 - **Built (Nov 8): a tidier Archive.** Shows the last 30 days ("Show older" for the rest); Delete on
   each archived role and Empty archive. Deleting keeps a hidden note so the job never comes back to
   the inbox; notes go 90 days after deletion once the job is no longer posted.
+- **Built (Nov 8): Discover clean-up.** Pay looked up on the company's own board when a VC board
+  leaves it out (Imprint: $190K–$210K); the same job filed under two companies shown once (Salesforce's
+  Slack jobs also listed as "Airkit"), with "links to salesforce" when the company and link disagree;
+  a filter bar on every list tab (place, minimum pay, keywords with -word to hide, pay listed), and
+  Archive all archives just what's in view.
 - **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
   proposals from feedback; "Send to JobBoard".
 - **Text alerts** for people who prefer them (ntfy or Twilio).

@@ -95,6 +95,9 @@ export class MemoryStore implements Store {
   async syncDiscoverMatches(profileId: string, rows: DiscoverMatchRow[]) {
     this.discoverMatches.set(profileId, rows);
   }
+  async saveDiscoverPay(rows: { id: string; comp?: DiscoverJob["comp"] }[]) {
+    for (const { id, comp } of rows) Object.assign(this.discover.get(id)!, { comp, compChecked: true });
+  }
   async markDigested(profileId: string, at: string) {
     this.people_.find((p) => p.id === profileId)!.last_digest_at = at;
   }
