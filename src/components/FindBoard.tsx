@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ATS_LABEL, boardUrl, findBoards, looksLikeUrl, type BoardHit } from '../lib/ats';
+import { ATS_LABEL, boardLabel, boardUrl, companyFromSiteUrl, findBoards, looksLikeUrl, parseBoardUrl, type BoardHit } from '../lib/ats';
 import type { NewWatch } from '../lib/types';
 import { Button, Field, Input, Modal } from './ui';
 
@@ -8,7 +8,8 @@ export const prettyBoard = (board: string) => board.replace(/[-_]+/g, ' ').repla
 
 /**
  * Find where a company posts jobs. A name is tried as likely board slugs on Greenhouse, Lever and Ashby;
- * a pasted job link is the sure route when the board name differs from the company name.
+ * a pasted job link is the sure route when the board name differs from the company name, and the only
+ * route to a Workday board.
  */
 export default function FindBoard({ title, initialName, allowUnmonitored = true, onClose, onPick }: {
   title: string;
@@ -35,10 +36,13 @@ export default function FindBoard({ title, initialName, allowUnmonitored = true,
       const found = await findBoards(query.trim());
       setHits(found);
       if (!name.trim()) {
-        // Greenhouse reports the company's name; for a pasted Lever/Ashby link, start from the board name.
+        // Greenhouse reports the company's name; for a pasted link, start from the board or site name.
         const display = found[0]?.displayName;
+        const fromSite = parseBoardUrl(query) ? undefined : companyFromSiteUrl(query);
         if (display) setName(display);
         else if (!looksLikeUrl(query)) setName(query.trim());
+        else if (found[0]?.ats === 'workday') setName(prettyBoard(found[0].board.split('/')[1]));
+        else if (fromSite) setName(prettyBoard(fromSite));
         else if (found[0]) setName(prettyBoard(found[0].board));
       }
     } finally {
@@ -64,7 +68,7 @@ export default function FindBoard({ title, initialName, allowUnmonitored = true,
   return (
     <Modal title={title} onClose={onClose}>
       <div className="space-y-3">
-        <Field label="Company name or a job link" hint="A link to any of their job postings is the surest way, e.g. jobs.ashbyhq.com/acme/…">
+        <Field label="Company name or a job link" hint="A link to any of their job postings is the surest way, e.g. jobs.ashbyhq.com/acme/… For Workday (…myworkdayjobs.com), a link is the only way.">
           <div className="flex gap-2">
             <Input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()} placeholder="Acme Robotics, or paste a job link" />
             <Button variant="primary" onClick={search} disabled={searching || !query.trim()}>{searching ? 'Looking…' : 'Find'}</Button>
@@ -84,10 +88,11 @@ export default function FindBoard({ title, initialName, allowUnmonitored = true,
                   <div key={`${h.ats}:${h.board}`} className="flex items-start gap-3 rounded-lg border border-line px-3 py-2.5">
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-semibold">
-                        {ATS_LABEL[h.ats]} · <a className="font-mono text-forest hover:underline" href={boardUrl(h.ats, h.board)} target="_blank" rel="noreferrer">{h.board}</a>
-                        <span className="ml-2 text-xs font-normal text-muted">{h.jobs} open{h.displayName ? ` · "${h.displayName}"` : ''}</span>
+                        {ATS_LABEL[h.ats]} · <a className="font-mono text-forest hover:underline" href={boardUrl(h.ats, h.board)} target="_blank" rel="noreferrer">{boardLabel(h.ats, h.board)}</a>
+                        {h.jobs !== undefined && <span className="ml-2 text-xs font-normal text-muted">{h.jobs} open{h.displayName ? ` · "${h.displayName}"` : ''}{h.hasJob ? ' · has the job you linked' : ''}</span>}
                       </div>
                       {h.sample.length > 0 && <div className="mt-0.5 truncate text-xs text-muted">{h.sample.join(' · ')}</div>}
+                      {h.jobs === undefined && <div className="mt-0.5 text-xs text-muted">Workday boards can't be previewed here; it's read as soon as you add it, and Companies shows if it works.</div>}
                     </div>
                     <Button size="sm" variant="primary" disabled={saving} onClick={() => pick({ name, ats: h.ats, board: h.board })}>Use this</Button>
                   </div>
@@ -96,7 +101,12 @@ export default function FindBoard({ title, initialName, allowUnmonitored = true,
             ) : (
               <div className="space-y-2 rounded-lg bg-paper px-3 py-3 text-sm">
                 <p>
-                  Not found on Greenhouse, Lever or Ashby. Try pasting a job link from their careers page{allowUnmonitored ? '; if they post somewhere else, you can still list them as not monitored for now' : ''}.
+                  Not found on Greenhouse, Lever or Ashby{allowUnmonitored ? '. If they post somewhere else, you can still list them as not monitored for now' : ''}.
+                </p>
+                <p className="text-muted">
+                  Tip: many companies' own careers sites are a front for one of these. Open one of their jobs and click
+                  Apply; if the page you land on has <span className="font-mono">myworkdayjobs</span>, <span className="font-mono">greenhouse</span>,{' '}
+                  <span className="font-mono">lever</span> or <span className="font-mono">ashby</span> in its address, paste that address above.
                 </p>
                 {allowUnmonitored && (<>
                 <Field label="Careers page (optional)">

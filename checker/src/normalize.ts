@@ -26,12 +26,10 @@ export function htmlToText(html: string): string {
   return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
-// One money amount: optional currency prefix, number with commas or a k suffix.
-const AMOUNT = String.raw`(CA\$|C\$|US\$|\$|CAD\s?|USD\s?)\s?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?([kK])?`;
-const RANGE = new RegExp(
-  `${AMOUNT}\\s*(?:-|–|—|to)\\s*${AMOUNT}(?:\\s*(USD|CAD))?`,
-  "g",
-);
+// One money amount: an optional currency before or after ("$150K", "152,000 USD"), and a number
+// with commas or a k suffix.
+const AMOUNT = String.raw`(CA\$|C\$|US\$|\$|CAD\s?|USD\s?)?\s?(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?([kK])?(?:\s?(USD|CAD)\b)?`;
+const RANGE = new RegExp(`${AMOUNT}\\s*(?:-|–|—|to)\\s*${AMOUNT}`, "g");
 
 function toNumber(digits: string, k?: string): number {
   const n = parseFloat(digits.replace(/,/g, ""));
@@ -53,10 +51,12 @@ export function parseCompText(text: string): { min: number; max: number; currenc
   for (const m of text.matchAll(RANGE)) {
     const after = text.slice(m.index! + m[0].length, m.index! + m[0].length + 12).toLowerCase();
     if (/^\s*(\/|per)\s*(hr|hour)/.test(after)) continue;
+    // A range only counts as pay when a currency is named somewhere in it ("10,000 - 50,000 users" isn't).
+    if (!m[1] && !m[4] && !m[5] && !m[8]) continue;
     const min = toNumber(m[2], m[3]);
-    const max = toNumber(m[5], m[6]);
+    const max = toNumber(m[6], m[7]);
     if (min < 20_000 || max > 2_000_000 || max < min) continue;
-    const currency = currencyOf(m[1], m[4], m[7]);
+    const currency = currencyOf(m[1], m[4], m[5], m[8]);
     if (!best) best = { min, max, currency };
     else if (best.currency === currency) {
       best = { min: Math.min(best.min, min), max: Math.max(best.max, max), currency };

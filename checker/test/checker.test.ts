@@ -70,7 +70,7 @@ describe("filters", () => {
 });
 
 // Tests never touch the network: pay lookups are stubbed unless a test supplies its own.
-const runCheck = (o: RunOptions) => realRunCheck({ fetchComp: async () => undefined, ...o });
+const runCheck = (o: RunOptions) => realRunCheck({ fetchDetails: async () => ({}), ...o });
 
 const JOSH = "josh-id";
 const JAKE = "jake-id";
@@ -227,23 +227,23 @@ describe("efficiency", () => {
   it("fetches pay only for new postings whose title fits someone, and remembers it", async () => {
     const { store, mailer, sent } = setup();
     const asked: string[] = [];
-    const fetchComp = async (_ats: unknown, _board: string, p: Posting) => {
+    const fetchDetails = async (_ats: unknown, _board: string, p: Posting) => {
       asked.push(p.id);
-      return { min: 100000, max: 120000, currency: "USD" }; // under the 140K floor
+      return { comp: { min: 100000, max: 120000, currency: "USD" } }; // under the 140K floor
     };
     let board = [job("1"), job("2", "Software Engineer")];
     const fetch = async () => ({ postings: board });
-    await runCheck({ store, mailer, fetch, fetchComp, now: at(1) });
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(1) });
     expect(asked).toEqual(["greenhouse:acme:1"]); // not the engineer role
     // Pay below the floor: not a match, but a near miss.
     expect(store.matches.get(JOSH)).toEqual([
       { profile_id: JOSH, posting_id: "greenhouse:acme:1", where_label: "NYC area", flags: [], near_miss: "pay", miss_detail: "Pay tops out at $120K (your floor: $140K)" },
     ]);
-    await runCheck({ store, mailer, fetch, fetchComp, now: at(2) });
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(2) });
     expect(asked).toHaveLength(1); // known postings reuse the stored pay
     expect(store.matches.get(JOSH)?.[0].near_miss).toBe("pay");
     board = [...board, job("5")];
-    await runCheck({ store, mailer, fetch, fetchComp, now: at(3) });
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(3) });
     expect(asked).toEqual(["greenhouse:acme:1", "greenhouse:acme:5"]);
     expect(sent.filter((e) => e.subject.startsWith("New match"))).toHaveLength(0);
   });
@@ -279,17 +279,17 @@ describe("unchanged boards", () => {
     let board = [job("1"), job("7", "Senior Account Manager")];
     const fetch = async () => ({ postings: board });
     const asked: string[] = [];
-    const fetchComp = async (_a: unknown, _b: string, p: Posting) => {
+    const fetchDetails = async (_a: unknown, _b: string, p: Posting) => {
       asked.push(p.id);
-      return { min: 150000, max: 170000, currency: "USD" };
+      return { comp: { min: 150000, max: 170000, currency: "USD" } };
     };
-    await runCheck({ store, mailer, fetch, fetchComp, now: at(1) });
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(1) });
     expect(asked).toEqual(["greenhouse:acme:1"]); // only Josh watches Acme so far
     store.watches_.push({ id: 9, profile_id: JAKE, company_id: 1, name: "Acme", careers_url: null, note: null, baselined_at: null });
-    await runCheck({ store, mailer, fetch, fetchComp, now: at(2) });
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(2) });
     expect(asked).toEqual(["greenhouse:acme:1", "greenhouse:acme:7"]);
     expect(store.postings.get("greenhouse:acme:7")!.comp).toEqual({ min: 150000, max: 170000, currency: "USD" });
-    await runCheck({ store, mailer, fetch, fetchComp, now: at(3) });
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(3) });
     expect(asked).toHaveLength(2); // never twice
   });
 });
@@ -478,5 +478,40 @@ describe("discover", () => {
     expect(sent[0].subject).toBe("JobSnipe is watching: 1 open matches");
     expect(s.errors).toEqual(["discover board #1: HTTP 503 from <url>", "discover board #2: HTTP 503 from <url>"]);
     expect(store.sources[0]).toMatchObject({ last_error: "HTTP 503 from https://api.getro.com/x", last_ok_at: null });
+  });
+});
+
+describe("Workday boards", () => {
+  // Like a Workday list entry: several places shown only as a count until the job's page is read.
+  const wd = (id: string): Posting =>
+    post({ id: `workday:acme:${id}`, source: "workday", locations: ["3 locations"], url: `https://acme/${id}`, compChecked: false, locationsFromDetails: true });
+  const details = async () => ({ comp: { min: 150000, max: 200000, currency: "USD" }, locations: ["US, CA, Santa Clara", "US, NY, New York"] });
+
+  it("match on places read from the job's page, keep them, and don't close jobs a partial read missed", async () => {
+    const { store, mailer } = setup();
+    let board: { postings: Posting[]; partial?: boolean } = { postings: [wd("1")] };
+    const fetch = async () => board;
+    const asked: string[] = [];
+    const fetchDetails = async (_a: unknown, _b: string, p: Posting) => {
+      asked.push(p.id);
+      return details();
+    };
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(1) });
+    expect(store.matches.get(JOSH)?.map((m) => [m.posting_id, m.where_label, m.near_miss])).toEqual([["workday:acme:1", "NYC area", null]]);
+    expect(store.postings.get("workday:acme:1")!.locations).toEqual(["US, CA, Santa Clara", "US, NY, New York"]);
+
+    // The board changes (a new job) and the list still says "3 locations": the stored places stand.
+    board = { postings: [wd("1"), wd("2")] };
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(2) });
+    expect(asked).toEqual(["workday:acme:1", "workday:acme:2"]);
+    expect(store.matches.get(JOSH)?.map((m) => m.posting_id)).toEqual(["workday:acme:1", "workday:acme:2"]);
+
+    // Too big to read in full: job 1 is missing from this read but may still be open.
+    board = { postings: [wd("2")], partial: true };
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(3) });
+    expect(store.postings.get("workday:acme:1")!.closed).toBe(false);
+    board = { postings: [wd("2")] };
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(4) });
+    expect(store.postings.get("workday:acme:1")!.closed).toBe(true);
   });
 });

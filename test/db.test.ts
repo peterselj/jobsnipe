@@ -231,4 +231,12 @@ describe('database', () => {
     await expect(as(JOSH, `update profiles set last_digest_at = now()`)).rejects.toThrow(/permission denied/);
     await expect(as(JOSH, `update profiles set digest_every = 'hourly'`)).rejects.toThrow(/check constraint/);
   });
+
+  it('0007 takes Workday boards, but only on Workday hosts', async () => {
+    await as(JOSH, `select add_watch('Nvidia', 'workday', 'nvidia.wd5.myworkdayjobs.com/nvidia/NVIDIAExternalCareerSite')`);
+    expect((await db.query(`select board from companies where ats = 'workday'`)).rows).toEqual([{ board: 'nvidia.wd5.myworkdayjobs.com/nvidia/NVIDIAExternalCareerSite' }]);
+    await expect(as(JOSH, `select add_watch('Evil', 'workday', 'evil.example.com/a/b')`)).rejects.toThrow(/companies_workday_board_check/);
+    await expect(as(JOSH, `select add_watch('Other', 'smartrecruiters', 'acme')`)).rejects.toThrow(/companies_ats_check/);
+    await db.exec(`delete from watches where company_id in (select id from companies where ats = 'workday'); delete from companies where ats = 'workday';`);
+  });
 });

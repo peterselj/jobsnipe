@@ -1,19 +1,19 @@
-import { boardUrl, compFetchers, fetchers } from "./ats/index.js";
+import { boardUrl, detailFetchers, fetchers } from "./ats/index.js";
 import { baselineEmail, healthEmail, matchEmail, type BaselineCompany, type Mailer } from "./email.js";
 import { withWatchFilters } from "../../shared/criteria.js";
 import { runDiscover, type SearchSource } from "./discover/run.js";
 import { evaluate, nearMiss, titleCheck, toFilters } from "./filters.js";
 import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "./store.js";
-import type { Ats, BoardResult, Filters, FilterResult, Posting } from "./types.js";
+import type { Ats, BoardResult, Details, Filters, FilterResult, Posting } from "./types.js";
 
 /** Consecutive failed checks before we email about a broken board (2 = about two hours). */
 export const FAILURE_ALERT_AFTER = 2;
 
-/** Cap on per-posting pay lookups per board per run, so a big new watcher can't stall a run. */
+/** Cap on per-posting detail lookups per board per run, so a big new watcher can't stall a run. */
 export const MAX_PAY_LOOKUPS = 40;
 
 type Fetch = (ats: Ats, board: string, company: string, etag?: string) => Promise<BoardResult>;
-type FetchComp = (ats: Ats, board: string, p: Posting) => Promise<Posting["comp"]>;
+type FetchDetails = (ats: Ats, board: string, p: Posting) => Promise<Details>;
 
 export interface RunOptions {
   store: Store;
@@ -21,8 +21,8 @@ export interface RunOptions {
   trigger?: string;
   now?: Date;
   fetch?: Fetch;
-  /** Pay for one posting, for boards whose list leaves it out. */
-  fetchComp?: FetchComp;
+  /** One posting's own page (pay, and places on Workday), for boards whose list leaves them out. */
+  fetchDetails?: FetchDetails;
   log?: (msg: string) => void;
   /** Read one Discover board (tests pass a stand-in). */
   searchDiscover?: SearchSource;
@@ -63,7 +63,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
   const iso = now.toISOString();
   const log = opts.log ?? (() => {});
   const fetch: Fetch = opts.fetch ?? ((ats, board, company, etag) => fetchers[ats](board, company, etag));
-  const fetchComp: FetchComp = opts.fetchComp ?? (async (ats, board, p) => compFetchers[ats]?.(board, p));
+  const fetchDetails: FetchDetails = opts.fetchDetails ?? (async (ats, board, p) => (await detailFetchers[ats]?.(board, p)) ?? {});
   const summary: RunSummary = { companies_checked: 0, new_postings: 0, alerts_sent: 0, errors: [] };
   const runId = await store.startRun(opts.trigger ?? "manual");
 
@@ -120,21 +120,38 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         const current = new Set(result.postings.map((p) => p.id));
         postings = result.postings.map((p) => {
           const k = known!.get(p.id);
-          return k
-            ? { ...p, atsPostedAt: k.atsPostedAt ?? p.atsPostedAt, comp: p.comp ?? k.comp, compChecked: p.compChecked || k.compChecked, companyId: c.id, firstSeenAt: k.firstSeenAt }
-            : { ...p, atsPostedAt: publishedAt(p.atsPostedAt, lastOk.get(c.id) ?? null, iso), companyId: c.id, firstSeenAt: iso };
+          if (!k) return { ...p, atsPostedAt: publishedAt(p.atsPostedAt, lastOk.get(c.id) ?? null, iso), companyId: c.id, firstSeenAt: iso };
+          // Places already read from the posting's own page beat the list's stand-in.
+          const placesKnown = p.locationsFromDetails && k.compChecked && !!k.locations?.length;
+          return {
+            ...p,
+            atsPostedAt: k.atsPostedAt ?? p.atsPostedAt,
+            comp: p.comp ?? k.comp,
+            compChecked: p.compChecked || k.compChecked,
+            ...(placesKnown ? { locations: k.locations!, workplace: k.workplace ?? p.workplace } : {}),
+            companyId: c.id,
+            firstSeenAt: k.firstSeenAt,
+          };
         });
         changes.reopened = [...known].filter(([id, k]) => k.closed && current.has(id)).map(([id]) => id);
-        changes.closed = [...known].filter(([id, k]) => !k.closed && !current.has(id)).map(([id]) => id);
+        // A board too big to read in full can't tell us what closed.
+        if (!result.partial) changes.closed = [...known].filter(([id, k]) => !k.closed && !current.has(id)).map(([id]) => id);
       }
 
       const watchers = watches.filter((w) => w.company_id === c.id).map(filtersFor).filter((f): f is Filters => !!f);
       const needPay = postings
         .filter((p) => p.compChecked === false && watchers.some((f) => !titleCheck(p.title, f)))
         .slice(0, MAX_PAY_LOOKUPS);
+      const placesRead = new Set<string>();
       await mapLimit(needPay, 4, async (p) => {
         try {
-          p.comp = await fetchComp(c.ats, c.board, p);
+          const d = await fetchDetails(c.ats, c.board, p);
+          p.comp = d.comp;
+          if (d.locations?.length) {
+            p.locations = d.locations;
+            placesRead.add(p.id);
+          }
+          if (d.workplace) p.workplace = d.workplace;
           p.compChecked = true;
         } catch {
           // Left unchecked so the next run tries again; meanwhile it shows as "no pay range listed".
@@ -143,7 +160,9 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
 
       // New postings are saved with their pay; stored ones get just the pay update.
       changes.added = known ? postings.filter((p) => !known!.has(p.id)) : [];
-      changes.priced = needPay.filter((p) => p.compChecked && (!known || known.has(p.id))).map((p) => ({ id: p.id, comp: p.comp }));
+      changes.priced = needPay
+        .filter((p) => p.compChecked && (!known || known.has(p.id)))
+        .map((p) => ({ id: p.id, comp: p.comp, ...(placesRead.has(p.id) ? { locations: p.locations, workplace: p.workplace } : {}) }));
       if (changes.added.length + changes.reopened.length + changes.closed.length + changes.priced.length) {
         await store.applyPostingChanges(c, changes, iso);
       }

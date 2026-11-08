@@ -77,6 +77,15 @@ Places they can surface, and what's built:
   a chip per VC, "+ Watch company" (straight onto your list when the job links to a board we read,
   otherwise the finder opens), and a digest email: daily, weekly, every 2 weeks or never. Sequoia,
   a16z, Kleiner, Lightspeed, Bessemer and Felicis run on Consider: next.
+- **Built (Nov 8):** Workday boards (pasted link only: Workday can't be found from a name or read by
+  the page, so the checker reads it as soon as it's added). Reads the whole board 20 at a time, splits
+  boards past Workday's 2,000-per-search cap by job category (NVIDIA: all 2,811), and reads a job's own
+  page for its places and pay when its title fits someone. Also: a company's own careers-site link is
+  turned into a name to try (careers.doordash.com → DoorDash, whose board is Greenhouse "doordashusa"),
+  a `?gh_jid=` in it picks the board that has that job, and "usa"/"us" are tried as name endings.
+- **More boards, next:** SmartRecruiters, Workable, Recruitee and BambooHR all have public job lists
+  like Greenhouse's. Truly custom career sites (Google, Apple, Amazon, Meta) each need their own reader.
+  The checker could also look inside a "not monitored" company's careers page for a board it links to.
 - **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
   proposals from feedback; "Send to JobBoard".
 - **Text alerts** for people who prefer them (ntfy or Twilio).
