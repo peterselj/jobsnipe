@@ -58,6 +58,14 @@ describe('finding boards', () => {
     expect(hits.map((h) => [h.board, h.hasJob])).toEqual([['doordashusa', true], ['doordash', false]]);
   });
 
+  it('finds boards checked by hand from a name or the company\'s own site', async () => {
+    const nothing = (async () => new Response('not found', { status: 404 })) as typeof fetch;
+    const nvidia = { ats: 'workday', board: 'nvidia.wd5.myworkdayjobs.com/nvidia/NVIDIAExternalCareerSite', sample: [], displayName: 'NVIDIA' };
+    expect(await findBoards('nvidia', nothing)).toEqual([nvidia]);
+    expect(await findBoards('NVIDIA Corporation', nothing)).toEqual([nvidia]);
+    expect(await findBoards('https://jobs.nvidia.com/careers', nothing)).toEqual([nvidia]);
+  });
+
   it("takes a Workday link as given, since the page can't read Workday", async () => {
     const fake = (async () => { throw new Error('should not fetch'); }) as unknown as typeof fetch;
     expect(await findBoards('https://acme.wd1.myworkdayjobs.com/External/job/x_R1', fake)).toEqual([

@@ -1,5 +1,6 @@
 import type { Ats } from '../../shared/ats';
 import { companyFromSiteUrl, GUESSABLE_ATS, jobIdFromUrl, parseBoardUrl, slugCandidates } from '../../shared/ats';
+import { knownBoardsFor } from '../../shared/knownBoards';
 
 export { ATS_LABEL, boardLabel, boardUrl, companyFromSiteUrl, looksLikeUrl, parseBoardUrl, slugCandidates } from '../../shared/ats';
 
@@ -60,10 +61,17 @@ export async function findBoards(input: string, fetchImpl: typeof fetch = fetch.
   const name = fromUrl ? undefined : companyFromSiteUrl(input) ?? input;
   const job = fromUrl ? undefined : jobIdFromUrl(input);
   const tries = fromUrl ? [fromUrl] : slugCandidates(name!).flatMap((board) => GUESSABLE_ATS.map((ats) => ({ ats, board })));
-  const hits = await Promise.all(tries.map((t) => probeBoard(t.ats, t.board, fetchImpl, job?.ats === t.ats ? job.id : undefined)));
+  // Boards checked by hand come first: they're the ones a name or a careers-site link can't find.
+  const known = name ? knownBoardsFor(name) : [];
+  const [knownHits, hits] = await Promise.all([
+    Promise.all(known.map(async (k) => (await probeBoard(k.ats, k.board, fetchImpl, job?.ats === k.ats ? job.id : undefined)) ?? { ats: k.ats, board: k.board, sample: [] })),
+    Promise.all(tries.map((t) => probeBoard(t.ats, t.board, fetchImpl, job?.ats === t.ats ? job.id : undefined))),
+  ]);
+  const isKnown = (h: BoardHit) => known.some((k) => k.ats === h.ats && k.board === h.board);
   // The board with the link's own job first; then the busiest, since an empty board under a guessed
   // slug is usually a stale or unrelated one.
-  return hits
-    .filter((h): h is BoardHit => !!h)
+  const guessed = hits
+    .filter((h): h is BoardHit => !!h && !isKnown(h))
     .sort((a, b) => Number(!!b.hasJob) - Number(!!a.hasJob) || (b.jobs ?? 0) - (a.jobs ?? 0));
+  return [...knownHits.map((h, i) => ({ ...h, displayName: h.displayName ?? known[i].name })), ...guessed];
 }

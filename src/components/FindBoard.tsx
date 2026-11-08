@@ -101,7 +101,12 @@ export default function FindBoard({ title, initialName, allowUnmonitored = true,
             ) : (
               <div className="space-y-2 rounded-lg bg-paper px-3 py-3 text-sm">
                 <p>
-                  Not found on Greenhouse, Lever or Ashby. Try pasting a job link from their careers page (Workday links work too){allowUnmonitored ? '; if they post somewhere else, you can still list them as not monitored for now' : ''}.
+                  Not found on Greenhouse, Lever or Ashby{allowUnmonitored ? '. If they post somewhere else, you can still list them as not monitored for now' : ''}.
+                </p>
+                <p className="text-muted">
+                  Tip: many companies' own careers sites are a front for one of these. Open one of their jobs and click
+                  Apply; if the page you land on has <span className="font-mono">myworkdayjobs</span>, <span className="font-mono">greenhouse</span>,{' '}
+                  <span className="font-mono">lever</span> or <span className="font-mono">ashby</span> in its address, paste that address above.
                 </p>
                 {allowUnmonitored && (<>
                 <Field label="Careers page (optional)">
