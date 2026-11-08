@@ -1,4 +1,5 @@
-import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "../src/store.js";
+import type { DiscoverJob, DiscoverSourceRow } from "../src/discover/types.js";
+import type { CompanyRow, DiscoverMatchRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "../src/store.js";
 import type { Person } from "../src/types.js";
 
 /** In-memory Store for tests; mirrors what SupabaseStore does against the real tables. */
@@ -12,6 +13,13 @@ export class MemoryStore implements Store {
   alerts = new Set<string>();
   matches = new Map<string, MatchRow[]>();
   runs: (RunSummary & { trigger: string; finished: boolean })[] = [];
+  sources: DiscoverSourceRow[] = [];
+  discover = new Map<string, DiscoverJob & { lastSeenAt: string }>();
+  discoverMatches = new Map<string, DiscoverMatchRow[]>();
+
+  addSource(id: number, name: string) {
+    this.sources.push({ id, kind: "getro", host: `jobs.${id}.example`, name, collection_id: null, enabled: true, last_checked_at: null, last_ok_at: null, last_error: null, open_postings: null });
+  }
 
   addCompany(id: number, ats: CompanyRow["ats"], board: string, name: string) {
     this.companies_.set(id, {
@@ -69,4 +77,25 @@ export class MemoryStore implements Store {
     this.matches.set(profileId, rows);
   }
   async prune() {}
+  async discoverSources() {
+    return this.sources.map((s) => ({ ...s }));
+  }
+  async updateDiscoverSource(id: number, patch: Partial<DiscoverSourceRow>) {
+    Object.assign(this.sources.find((s) => s.id === id)!, patch);
+  }
+  async saveDiscoverPostings(jobs: DiscoverJob[], at: string) {
+    for (const j of jobs) {
+      const k = this.discover.get(j.id);
+      this.discover.set(j.id, k ? { ...k, ...j, via: [...new Set([...k.via, ...j.via])].sort(), firstSeenAt: k.firstSeenAt, lastSeenAt: at } : { ...j, firstSeenAt: at, lastSeenAt: at });
+    }
+  }
+  async openDiscoverPostings(since: string) {
+    return [...this.discover.values()].filter((j) => j.lastSeenAt >= since);
+  }
+  async syncDiscoverMatches(profileId: string, rows: DiscoverMatchRow[]) {
+    this.discoverMatches.set(profileId, rows);
+  }
+  async markDigested(profileId: string, at: string) {
+    this.people_.find((p) => p.id === profileId)!.last_digest_at = at;
+  }
 }

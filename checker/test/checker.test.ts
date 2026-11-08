@@ -3,6 +3,7 @@ import { makeMailer, type Email, type Mailer } from "../src/email.js";
 import { evaluate, toFilters } from "../src/filters.js";
 import { htmlToText, parseCompText } from "../src/normalize.js";
 import { runCheck as realRunCheck, type RunOptions } from "../src/run.js";
+import type { DiscoverJob } from "../src/discover/types.js";
 import type { Criteria, Posting } from "../src/types.js";
 import { MemoryStore } from "./memoryStore.js";
 
@@ -396,6 +397,87 @@ describe("age limit", () => {
     // Later reads keep the corrected date even though the board still says 4 days.
     await runCheck({ store, mailer, fetch, now: at(6) });
     expect(store.matches.get(JOSH)!.filter((m) => !m.near_miss)).toHaveLength(2);
+  });
+});
+
+describe("discover", () => {
+  // Jobs as two VC boards list them; the same Northwind job is on both.
+  const dj = (id: string, over: Partial<DiscoverJob> = {}): DiscoverJob => ({
+    id, company: "Northwind", title: "Senior Product Manager", locations: ["New York, NY, USA"], url: `https://jobs.ashbyhq.com/northwind/${id}`,
+    comp: { min: 180000, max: 220000, currency: "USD" }, via: ["Board A"], ...over,
+  });
+  function discoverSetup() {
+    const s = setup();
+    s.store.addSource(1, "Board A");
+    s.store.addSource(2, "Board B");
+    const reads: string[] = [];
+    let boards: Record<string, DiscoverJob[]> = {
+      "Board A": [
+        dj("d:1"),
+        dj("d:2", { title: "Software Engineer" }), // title doesn't fit anyone: not even stored
+        dj("d:3", { company: "Acme Inc.", url: "https://jobs.lever.co/somewhere/3" }), // Acme is on Josh's list (by name)
+        dj("d:4", { company: "Other", url: "https://job-boards.greenhouse.io/acme/jobs/4" }), // Acme's own board
+        dj("d:5", { company: "Faraway", locations: ["Berlin, Germany"] }), // a near miss: not in Discover
+      ],
+      "Board B": [dj("d:1", { via: ["Board B"] })],
+    };
+    const searchDiscover = async (src: { name: string }, queries: string[]) => {
+      reads.push(`${src.name}:${queries.join("+")}`);
+      return { jobs: boards[src.name] ?? [], collectionId: "c" };
+    };
+    return { ...s, reads, searchDiscover, setBoards: (b: typeof boards) => (boards = b) };
+  }
+
+  it("finds roles that pass every filter at companies not on your list, and sums them up daily", async () => {
+    const { store, sent, mailer, reads, searchDiscover, setBoards } = discoverSetup();
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(1) });
+
+    const q = CRITERIA.titles!.include!.join("+");
+    expect(reads).toEqual([`Board A:${q}`, `Board B:${q}`]);
+    expect([...store.discover.keys()].sort()).toEqual(["d:1", "d:3", "d:4", "d:5"]);
+    expect(store.discover.get("d:1")!.via).toEqual(["Board A", "Board B"]);
+    expect(store.discoverMatches.get(JOSH)!.map((m) => m.posting_id)).toEqual(["d:1"]);
+    expect(store.discoverMatches.get(JAKE)).toEqual([]);
+    const digest = sent.find((e) => e.subject.startsWith("Discover"))!;
+    expect(digest.subject).toBe("Discover: 1 new role at companies you don't watch");
+    expect(digest.text).toMatch(/Northwind — Senior Product Manager[\s\S]*via Board A, Board B/);
+
+    // Two hours later: boards aren't due yet, and the day's digest has gone.
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(3) });
+    expect(reads).toHaveLength(2);
+    expect(sent.filter((e) => e.subject.startsWith("Discover"))).toHaveLength(1);
+
+    // Next read finds a new role; the next day's digest lists only it.
+    setBoards({ "Board A": [dj("d:1"), dj("d:6", { company: "Brightpath", title: "Staff Product Manager" })], "Board B": [] });
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(5) });
+    expect(sent.filter((e) => e.subject.startsWith("Discover"))).toHaveLength(1);
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(25) });
+    const second = sent.filter((e) => e.subject.startsWith("Discover"))[1];
+    expect(second.subject).toBe("Discover: 1 new role at companies you don't watch");
+    expect(second.text).toMatch(/Brightpath/);
+    expect(second.text).not.toMatch(/Northwind/);
+  });
+
+  it("follows each person's digest setting, and pausing skips the email but keeps the rhythm", async () => {
+    const { store, sent, mailer, searchDiscover } = discoverSetup();
+    store.people_[0].digest_every = "never";
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(1) });
+    expect(sent.filter((e) => e.subject.startsWith("Discover"))).toHaveLength(0);
+    expect(store.discoverMatches.get(JOSH)!.map((m) => m.posting_id)).toEqual(["d:1"]); // still on the page
+
+    store.people_[0].digest_every = "weekly";
+    store.people_[0].alerts_paused = true;
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(2) });
+    expect(sent.filter((e) => e.subject.startsWith("Discover"))).toHaveLength(0);
+    expect(store.people_[0].last_digest_at).toBe(at(2).toISOString());
+  });
+
+  it("a broken board is reported without holding anything up", async () => {
+    const { store, sent, mailer } = discoverSetup();
+    const s = await runCheck({ store, mailer, fetch: async () => ({ postings: [job("1")] }), now: at(1), searchDiscover: async () => { throw new Error("HTTP 503 from https://api.getro.com/x"); } });
+    expect(sent[0].subject).toBe("JobSnipe is watching: 1 open matches");
+    expect(s.errors).toEqual(["discover board #1: HTTP 503 from <url>", "discover board #2: HTTP 503 from <url>"]);
+    expect(store.sources[0]).toMatchObject({ last_error: "HTTP 503 from https://api.getro.com/x", last_ok_at: null });
   });
 });
 

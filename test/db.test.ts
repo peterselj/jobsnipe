@@ -214,6 +214,24 @@ describe('database', () => {
     ]);
   });
 
+  it('Discover: jobs merge across boards, and each person sees only their own matches', async () => {
+    const job = (via: string) => [{ id: 'd:abc', company: 'Northwind', title: 'Senior PM', locations: ['New York, NY, USA'], url: 'https://x/1', via: [via], comp_min: 180000, comp_max: 220000, comp_currency: 'USD' }];
+    await db.query(`select save_discover_postings($1::jsonb, '2026-11-03T01:00Z')`, [JSON.stringify(job('Board B'))]);
+    await db.query(`select save_discover_postings($1::jsonb, '2026-11-03T05:00Z')`, [JSON.stringify(job('Board A'))]);
+    expect((await db.query(`select via, to_char(first_seen_at at time zone 'UTC', 'HH24') f, to_char(last_seen_at at time zone 'UTC', 'HH24') l from discover_postings`)).rows).toEqual([
+      { via: ['Board A', 'Board B'], f: '01', l: '05' },
+    ]);
+    await db.query(`select sync_discover_matches('${JOSH}', $1::jsonb)`, [JSON.stringify([{ posting_id: 'd:abc', where_label: 'NYC area', flags: [] }])]);
+    expect(await as(JOSH, 'select d.title, m.where_label from discover_matches m join discover_postings d on d.id = m.posting_id')).toEqual([{ title: 'Senior PM', where_label: 'NYC area' }]);
+    expect(await as(JAKE, 'select * from discover_matches')).toEqual([]);
+    expect(await as(JAKE, 'select * from discover_postings')).toEqual([]);
+    expect((await as(JAKE, 'select name from discover_sources order by id')).length).toBe(5);
+    await expect(as(JOSH, `select save_discover_postings('[]'::jsonb, now())`)).rejects.toThrow(/permission denied/);
+    await as(JOSH, `update profiles set digest_every = 'weekly'`);
+    await expect(as(JOSH, `update profiles set last_digest_at = now()`)).rejects.toThrow(/permission denied/);
+    await expect(as(JOSH, `update profiles set digest_every = 'hourly'`)).rejects.toThrow(/check constraint/);
+  });
+
   it('0007 takes Workday boards, but only on Workday hosts', async () => {
     await as(JOSH, `select add_watch('Nvidia', 'workday', 'nvidia.wd5.myworkdayjobs.com/nvidia/NVIDIAExternalCareerSite')`);
     expect((await db.query(`select board from companies where ats = 'workday'`)).rows).toEqual([{ board: 'nvidia.wd5.myworkdayjobs.com/nvidia/NVIDIAExternalCareerSite' }]);

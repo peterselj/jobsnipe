@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { ago, money } from '../../shared/format';
-import type { Feedback, Match, Verdict } from '../lib/types';
+import type { DigestEvery, DiscoverSource, Feedback, Match, NewWatch, Verdict } from '../lib/types';
+import FindBoard from './FindBoard';
 import { Button } from './ui';
 
-type Folder = 'inbox' | 'interested' | 'not_for_me' | 'near' | 'archive';
+type Folder = 'inbox' | 'interested' | 'not_for_me' | 'near' | 'discover' | 'archive';
+
+const DIGEST_LABEL: Record<DigestEvery, string> = { daily: 'a daily', weekly: 'a weekly', biweekly: 'a fortnightly', never: 'no' };
 type MissCheck = NonNullable<Match['nearMiss']>;
 
 export const MISS_LABEL: Record<MissCheck, string> = { pay: 'Pay', location: 'Place', seniority: 'Level', age: 'Age' };
@@ -17,6 +20,10 @@ interface Props {
   /** Shown in the inbox when there's nothing to triage because no filters are set. */
   needsFilters?: boolean;
   onOpenSettings?: () => void;
+  /** Discover: start watching a company found there. */
+  onWatch: (c: NewWatch) => Promise<void>;
+  discoverSources: DiscoverSource[];
+  digestEvery: DigestEvery;
 }
 
 const DAY = 86_400_000;
@@ -27,14 +34,19 @@ const DAY = 86_400_000;
  * good, so it never comes back. Decided and archived roles are read from the saved verdicts, so
  * they stay listed after the posting closes.
  */
-export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings }: Props) {
+export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings, onWatch, discoverSources, digestEvery }: Props) {
   const [folder, setFolder] = useState<Folder>('inbox');
   const [missFilter, setMissFilter] = useState<MissCheck | null>(null);
+  const [viaFilter, setViaFilter] = useState<string | null>(null);
   const open = new Map(matches.map((m) => [m.id, m]));
 
-  const inbox = matches.filter((m) => !m.nearMiss && !feedback[m.id]);
+  const inbox = matches.filter((m) => !m.nearMiss && !m.via && !feedback[m.id]);
   // Near misses: right job family, missed by one filter. Marking one Interested moves it to Interested.
   const near = matches.filter((m) => m.nearMiss && !feedback[m.id]);
+  // Discover: the opposite of a near miss. Every filter passes, but the company isn't on your list.
+  const discover = matches.filter((m) => m.via && !feedback[m.id]);
+  const viaCounts = new Map<string, number>();
+  for (const m of discover) for (const v of m.via!) viaCounts.set(v, (viaCounts.get(v) ?? 0) + 1);
   const missCounts = near.reduce<Partial<Record<MissCheck, number>>>((acc, m) => ({ ...acc, [m.nearMiss!]: (acc[m.nearMiss!] ?? 0) + 1 }), {});
   const fromVerdicts = (keep: (f: Verdict) => boolean, newestBy: (f: Verdict) => string) =>
     Object.entries(feedback)
@@ -46,13 +58,17 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
     interested: fromVerdicts((f) => f.verdict === 'interested' && !f.archivedAt, (f) => f.at),
     not_for_me: fromVerdicts((f) => f.verdict === 'not_for_me' && !f.archivedAt, (f) => f.at),
     near: missFilter ? near.filter((m) => m.nearMiss === missFilter) : near,
+    discover: viaFilter ? discover.filter((m) => m.via!.includes(viaFilter)) : discover,
     archive: fromVerdicts((f) => !!f.archivedAt, (f) => f.archivedAt!),
   };
   const shown = lists[folder];
 
   // Archive everything in the current view, keeping each role's decision.
   const archiveAll = () => {
-    const where = tabs.find((t) => t.key === folder)!.label.replace('★ ', '') + (folder === 'near' && missFilter ? ` (${MISS_LABEL[missFilter]})` : '');
+    const where =
+      tabs.find((t) => t.key === folder)!.label.replace('★ ', '') +
+      (folder === 'near' && missFilter ? ` (${MISS_LABEL[missFilter]})` : '') +
+      (folder === 'discover' && viaFilter ? ` (via ${viaFilter})` : '');
     if (!confirm(`Archive all ${shown.length} roles in ${where}? You can restore any of them from the Archive.`)) return;
     const at = new Date().toISOString();
     onVerdicts(
@@ -68,25 +84,26 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
     { key: 'interested', label: '★ Interested' },
     { key: 'not_for_me', label: 'Not for me' },
     { key: 'near', label: 'Near misses' },
+    { key: 'discover', label: 'Discover' },
     { key: 'archive', label: 'Archive' },
   ];
 
   return (
     <section>
-      <div className="mb-3 flex items-center gap-1 border-b border-line-strong" role="tablist">
+      <div className="mb-3 flex items-center gap-1 overflow-x-auto border-b border-line-strong [scrollbar-width:none]" role="tablist">
         {tabs.map((t) => (
           <button
             key={t.key}
             role="tab"
             aria-selected={folder === t.key}
             onClick={() => setFolder(t.key)}
-            className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
+            className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
               folder === t.key ? 'border-forest text-ink' : 'border-transparent text-muted hover:text-ink-soft'
             }`}
           >
             {t.label}
             <span className={`rounded-full px-1.5 py-px font-mono text-[10px] ${t.key === 'inbox' && inbox.length ? 'bg-forest text-white' : 'bg-slate-200 text-ink-soft'}`}>
-              {t.key === 'near' ? near.length : lists[t.key].length}
+              {t.key === 'near' ? near.length : t.key === 'discover' ? discover.length : lists[t.key].length}
             </span>
           </button>
         ))}
@@ -115,6 +132,31 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
         </div>
       )}
 
+      {folder === 'discover' && (
+        <div className="mb-3 rounded-xl border border-line bg-white px-4 py-3">
+          <p className="text-sm text-ink-soft">
+            Roles that pass <b>all</b> your filters at companies you don't watch, from VC portfolio job boards
+            {discoverSources.length ? ` (${discoverSources.map((s) => s.name).join(', ')})` : ''}. Checked every 4 hours and sent as{' '}
+            {DIGEST_LABEL[digestEvery]} digest email (
+            {onOpenSettings ? <button className="font-semibold text-forest underline-offset-2 hover:underline" onClick={onOpenSettings}>change</button> : 'change in Settings'}
+            ). Like a company? <b>Watch it</b> to hear about its new roles within the hour.
+          </p>
+          {viaCounts.size > 1 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {[null, ...[...viaCounts.keys()].sort()].map((v) => (
+                <button
+                  key={v ?? 'all'}
+                  onClick={() => setViaFilter(v)}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${viaFilter === v ? 'border-forest bg-emerald-50 text-forest' : 'border-line-strong text-ink-soft hover:bg-paper'}`}
+                >
+                  {v ? `${v} · ${viaCounts.get(v)}` : `All · ${discover.length}`}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {folder !== 'archive' && shown.length > 1 && (
         <div className="mb-2 flex justify-end">
           <Button size="sm" variant="ghost" onClick={archiveAll}>Archive all {shown.length} →</Button>
@@ -126,7 +168,7 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
       ) : (
         <div className="space-y-2.5">
           {shown.map((m) => (
-            <MatchCard key={m.id} m={m} verdict={feedback[m.id]} onVerdict={onVerdict} />
+            <MatchCard key={m.id} m={m} verdict={feedback[m.id]} onVerdict={onVerdict} onWatch={onWatch} />
           ))}
         </div>
       )}
@@ -149,6 +191,7 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
     interested: ['Nothing starred yet', 'Mark a role ★ Interested and it lands here, even after the posting closes.'],
     not_for_me: ['Nothing dismissed', 'Roles you mark Not for me are kept here, out of your way.'],
     near: ['No near misses', 'Roles your filters hid for just one reason (pay, place, level or age) show up here.'],
+    discover: ['Nothing to discover yet', 'Roles that pass all your filters at companies you don\'t watch show up here, from VC portfolio job boards checked every 4 hours.'],
     archive: ['Archive is empty', "Done with a role (applied, moved it to JobBoard, or it's just stale)? Archive it. It stays here and never comes back to your inbox."],
   }[folder];
   return (
@@ -159,8 +202,20 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
   );
 }
 
-function MatchCard({ m, verdict, onVerdict }: { m: Match & { closed?: boolean }; verdict?: Verdict; onVerdict: Props['onVerdict'] }) {
+function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: boolean }; verdict?: Verdict; onVerdict: Props['onVerdict']; onWatch: Props['onWatch'] }) {
   const [asking, setAsking] = useState(false);
+  const [finding, setFinding] = useState(false);
+  const [watching, setWatching] = useState(false);
+  // Watch: straight away when we know the company's board, otherwise look for it first.
+  const watch = async () => {
+    if (!(m.ats && m.board)) return setFinding(true);
+    setWatching(true);
+    try {
+      await onWatch({ name: m.company, ats: m.ats, board: m.board });
+    } finally {
+      setWatching(false);
+    }
+  };
   const [reason, setReason] = useState('');
   const interested = verdict?.verdict === 'interested' && !verdict.archivedAt;
   const archived = !!verdict?.archivedAt;
@@ -210,6 +265,7 @@ function MatchCard({ m, verdict, onVerdict }: { m: Match & { closed?: boolean };
             </div>
           )}
           {m.flags.length > 0 && <div className="mt-1 text-[13px] text-gold">⚑ {m.flags.join(' · ')}</div>}
+          {m.via && !verdict && <div className="mt-1 text-[12px] text-muted">via {m.via.join(', ')} · not on your list</div>}
           {verdict?.reason && <div className="mt-1 text-[13px] text-muted">“{verdict.reason}”</div>}
         </div>
 
@@ -227,11 +283,28 @@ function MatchCard({ m, verdict, onVerdict }: { m: Match & { closed?: boolean };
                 <Button size="sm" onClick={() => decide('interested')}>{m.nearMiss ? '★ Interested anyway' : '★ Interested'}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>Not for me</Button>
                 <Button size="sm" variant="ghost" onClick={archive} title="Not worth deciding (e.g. stale): archive it so it never comes back">Archive</Button>
+                {m.via && (
+                  <Button size="sm" variant="ghost" onClick={watch} disabled={watching} title="Add this company to your list: its new roles are checked hourly and emailed">
+                    {watching ? 'Adding…' : '+ Watch company'}
+                  </Button>
+                )}
               </div>
             )
           )}
         </div>
       </div>
+
+      {finding && (
+        <FindBoard
+          title={`Watch ${m.company}`}
+          initialName={m.company}
+          onClose={() => setFinding(false)}
+          onPick={async (c) => {
+            await onWatch(c);
+            setFinding(false);
+          }}
+        />
+      )}
 
       {asking && (
         <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3 sm:flex-row sm:items-center">

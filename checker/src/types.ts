@@ -21,6 +21,9 @@ export interface Person {
   alert_mode: "immediate" | "hourly" | "daily" | "weekly";
   /** Matches keep updating but no email is sent. */
   alerts_paused?: boolean;
+  /** How often the Discover digest comes ("never" = page only), and when the last one went. */
+  digest_every?: "daily" | "weekly" | "biweekly" | "never";
+  last_digest_at?: string | null;
 }
 
 /** A posting as normalized from any ATS. */

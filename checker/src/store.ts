@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { DiscoverJob, DiscoverSourceRow } from "./discover/types.js";
 import type { Ats, Person, Posting, WatchFilters } from "./types.js";
 
 export interface CompanyRow {
@@ -63,6 +64,12 @@ export interface MatchRow {
   miss_detail?: string | null;
 }
 
+export interface DiscoverMatchRow {
+  posting_id: string;
+  where_label: string | null;
+  flags: string[];
+}
+
 export interface RunSummary {
   companies_checked: number;
   new_postings: number;
@@ -91,6 +98,15 @@ export interface Store {
   /** Make a person's matches exactly `rows`, in one transaction (the inbox never sees a gap). */
   syncMatches(profileId: string, rows: MatchRow[]): Promise<void>;
   prune(now: Date): Promise<void>;
+  // Discover
+  discoverSources(): Promise<DiscoverSourceRow[]>;
+  updateDiscoverSource(id: number, patch: Partial<DiscoverSourceRow>): Promise<void>;
+  /** Add new jobs and mark known ones seen (and listed by any new boards). */
+  saveDiscoverPostings(jobs: DiscoverJob[], at: string): Promise<void>;
+  /** Jobs seen on some board since `since`. */
+  openDiscoverPostings(since: string): Promise<DiscoverJob[]>;
+  syncDiscoverMatches(profileId: string, rows: DiscoverMatchRow[]): Promise<void>;
+  markDigested(profileId: string, at: string): Promise<void>;
 }
 
 const DAY = 86_400_000;
@@ -149,7 +165,7 @@ export class SupabaseStore implements Store {
   }
 
   async people() {
-    return this.all<Person>("load profiles", (a, b) => this.db.from("profiles").select("id, name, email, criteria, alert_mode, alerts_paused").order("id").range(a, b));
+    return this.all<Person>("load profiles", (a, b) => this.db.from("profiles").select("id, name, email, criteria, alert_mode, alerts_paused, digest_every, last_digest_at").order("id").range(a, b));
   }
 
   async watches() {
@@ -242,5 +258,44 @@ export class SupabaseStore implements Store {
     this.check(await this.db.from("runs").delete().lt("started_at", before(30)), "prune runs");
     this.check(await this.db.from("check_requests").delete().lt("requested_at", before(7)), "prune requests");
     this.check(await this.db.rpc("prune_unwatched_boards"), "prune unwatched boards");
+    this.check(await this.db.from("discover_postings").delete().lt("last_seen_at", before(30)), "prune discover postings");
+  }
+
+  async discoverSources() {
+    return this.check(await this.db.from("discover_sources").select("*").order("id"), "load discover boards") as DiscoverSourceRow[];
+  }
+
+  async updateDiscoverSource(id: number, patch: Partial<DiscoverSourceRow>) {
+    this.check(await this.db.from("discover_sources").update(patch).eq("id", id), "update discover board");
+  }
+
+  async saveDiscoverPostings(jobs: DiscoverJob[], at: string) {
+    const rows = jobs.map((j) => ({
+      id: j.id, company: j.company, title: j.title, locations: j.locations, workplace: j.workplace ?? null, url: j.url,
+      posted_at: j.postedAt ?? null, comp_min: j.comp ? Math.round(j.comp.min) : null, comp_max: j.comp ? Math.round(j.comp.max) : null,
+      comp_currency: j.comp?.currency ?? null, ats: j.ats ?? null, board: j.board ?? null, via: j.via,
+    }));
+    for (let i = 0; i < rows.length; i += 500) {
+      this.check(await this.db.rpc("save_discover_postings", { p_rows: rows.slice(i, i + 500), p_at: at }), "save discover postings");
+    }
+  }
+
+  async openDiscoverPostings(since: string) {
+    const rows = await this.all<any>("load discover postings", (a, b) =>
+      this.db.from("discover_postings").select("*").gte("last_seen_at", since).order("id").range(a, b),
+    );
+    return rows.map((r): DiscoverJob => ({
+      id: r.id, company: r.company, title: r.title, locations: r.locations ?? [], workplace: r.workplace ?? undefined, url: r.url,
+      postedAt: r.posted_at ?? undefined, comp: compOf(r), ats: r.ats ?? undefined, board: r.board ?? undefined,
+      via: r.via ?? [], firstSeenAt: r.first_seen_at,
+    }));
+  }
+
+  async syncDiscoverMatches(profileId: string, rows: DiscoverMatchRow[]) {
+    this.check(await this.db.rpc("sync_discover_matches", { p_profile: profileId, p_rows: rows }), "save discover matches");
+  }
+
+  async markDigested(profileId: string, at: string) {
+    this.check(await this.db.from("profiles").update({ last_digest_at: at }).eq("id", profileId), "mark digest sent");
   }
 }
