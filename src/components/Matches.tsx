@@ -236,7 +236,8 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
         <div className="mb-3 rounded-xl border border-line bg-white px-4 py-3">
           <p className="text-sm text-ink-soft">
             Roles that pass <b>all</b> your filters at companies you don't watch, from VC portfolio job boards
-            {discoverSources.length ? ` (${discoverSources.map((s) => s.name).join(', ')})` : ''}. Checked every 4 hours and sent as{' '}
+            {discoverSources.length ? ` (${discoverSources.map((s) => s.name).join(', ')})` : ''}
+            {discover.some((m) => m.via!.some((v) => v.endsWith(' alert'))) ? ' and your job-alert emails' : ''}. Checked every 4 hours and sent as{' '}
             {DIGEST_LABEL[digestEvery]} digest email (
             {onOpenSettings ? <button className="font-semibold text-forest underline-offset-2 hover:underline" onClick={onOpenSettings}>change</button> : 'change in Settings'}
             ). Like a company? <b>Watch it</b> to hear about its new roles within the hour.
