@@ -9,8 +9,9 @@ import { getJson, postJson } from "./http.js";
 // for one job. Pages hold at most 20 jobs, newest first, and one search stops at 2,000 jobs.
 
 interface WdListJob {
-  title: string;
-  externalPath: string;
+  // Normally always there, but Workday sometimes sends an entry without them.
+  title?: string;
+  externalPath?: string;
   /** One place, or just "3 Locations" when there are several. */
   locationsText?: string;
   /** "Posted Today", "Posted Yesterday", "Posted 3 Days Ago", "Posted 30+ Days Ago". */
@@ -158,10 +159,19 @@ export async function listWorkday(board: WorkdayBoard): Promise<{ jobs: WdListJo
 
 export async function fetchWorkday(board: string, company: string, etag?: string, now = new Date()): Promise<BoardResult> {
   const b = boardOf(board);
-  const { jobs, partial } = await listWorkday(b);
+  const listed = await listWorkday(b);
+  const { jobs } = listed;
+  let { partial } = listed;
   const site = workdaySiteUrl(b);
   const byId = new Map<string, Posting>();
+  let skipped = false;
   for (const j of jobs) {
+    // An entry with no link or title can't be shown or followed. Skip it rather than fail the whole
+    // board, and count the read as partial so nothing is marked closed because of it.
+    if (!j.externalPath?.trim() || !j.title?.trim()) {
+      skipped = true;
+      continue;
+    }
     const key = jobKey(j.externalPath);
     const id = `workday:${board}:${key}`;
     if (byId.has(id)) continue; // a job can show up under two categories
@@ -184,6 +194,7 @@ export async function fetchWorkday(board: string, company: string, etag?: string
     });
   }
   const postings = [...byId.values()];
+  partial ||= skipped;
   // Workday sends no version tag, so make one from what we keep. "Posted N days ago" changes daily
   // by itself, so it's left out.
   const tag =

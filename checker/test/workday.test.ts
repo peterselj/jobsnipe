@@ -126,3 +126,19 @@ describe("Workday", () => {
     expect(parseCompText("Between 25,000 - 100,000 users a day")).toBeUndefined();
   });
 });
+
+describe("Workday entries missing fields", () => {
+  it("skips a job entry with no link or title instead of failing the whole board, and closes nothing that read", async () => {
+    vi.stubGlobal("fetch", async () =>
+      Response.json({
+        total: 3,
+        jobPostings: [listJob(1), { title: "Placeholder with no link" }, { externalPath: "/job/x/No-Title_JR9" }],
+        facets: [],
+      }),
+    );
+    const r = await fetchWorkday(BOARD, "Acme", undefined, NOW);
+    if (r.unchanged) throw new Error("expected postings");
+    expect(r.postings.map((p) => p.id)).toEqual([`workday:${BOARD}:JR1001`]);
+    expect(r.partial).toBe(true); // a job we couldn't read might still be open
+  });
+});
