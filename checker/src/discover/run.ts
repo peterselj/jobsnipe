@@ -3,10 +3,11 @@ import { HttpError } from "../ats/http.js";
 import { fetchers } from "../ats/index.js";
 import { greenhouseDetails } from "../ats/greenhouse.js";
 import { workdayDetails } from "../ats/workday.js";
-import { digestEmail, type Mailer } from "../email.js";
+import { digestEmail, matchEmail, type Mailer } from "../email.js";
 import { evaluate, titleCheck, toFilters } from "../filters.js";
 import type { CompanyRow, Store, WatchRow } from "../store.js";
 import type { BoardResult, Filters, Person, Posting } from "../types.js";
+import { jobsFromEmail } from "./email.js";
 import { getroCollectionId, searchGetro } from "./getro.js";
 import type { DiscoverJob, DiscoverSourceRow } from "./types.js";
 
@@ -19,6 +20,8 @@ import type { DiscoverJob, DiscoverSourceRow } from "./types.js";
 export const DISCOVER_EVERY_HOURS = 4;
 /** A Discover job not seen on any board for this long counts as closed. */
 export const OPEN_FOR_DAYS = 2;
+/** Jobs from job-alert emails are shown this long after the email (there's no board to re-check). */
+export const EMAILED_OPEN_FOR_DAYS = 14;
 const DIGEST_DAYS = { daily: 1, weekly: 7, biweekly: 14 } as const;
 /** Digest lists stop here; the rest are on the page. */
 export const DIGEST_MAX = 30;
@@ -138,12 +141,12 @@ export interface DiscoverOptions {
   redact: (s: string) => string;
 }
 
-export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number; digests: number; errors: string[] }> {
+export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number; emails: number; errors: string[] }> {
   const { store, now } = o;
   const iso = now.toISOString();
   const log = o.log ?? (() => {});
   const search = o.search ?? searchSource;
-  const out = { boards: 0, digests: 0, errors: [] as string[] };
+  const out = { boards: 0, emails: 0, errors: [] as string[] };
 
   const filters = new Map<string, Filters>(o.people.map((p) => [p.id, toFilters(p.criteria)]));
   const searchers = o.people.filter((p) => filters.get(p.id)!.titles.include.length);
@@ -179,7 +182,32 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
     if (found.size) await store.saveDiscoverPostings([...found.values()], iso);
   }
 
-  const open = await store.openDiscoverPostings(new Date(now.getTime() - OPEN_FOR_DAYS * DAY).toISOString());
+  // Job-alert emails: read what arrived since the last run. Their jobs belong to whoever's inbox it was.
+  const emails = await store.unreadEmails();
+  if (emails.length) {
+    const fromEmail: DiscoverJob[] = [];
+    const read: { id: number; jobs_found: number }[] = [];
+    for (const e of emails) {
+      let jobs: DiscoverJob[] = [];
+      try {
+        jobs = jobsFromEmail(e);
+      } catch (err) {
+        out.errors.push(`reading an inbox email failed: ${o.redact(err instanceof Error ? err.message : String(err))}`);
+      }
+      fromEmail.push(...jobs);
+      read.push({ id: e.id, jobs_found: jobs.length });
+    }
+    if (fromEmail.length) await store.saveDiscoverPostings(fromEmail, iso);
+    await store.markEmailsRead(read, iso);
+    log(`  inbox: ${emails.length} email(s), ${fromEmail.length} job(s)`);
+  }
+
+  // VC-board jobs count as closed once they're gone from the boards for two days; emailed jobs stay
+  // for two weeks (alerts and newsletters come daily or weekly).
+  const boardCutoff = new Date(now.getTime() - OPEN_FOR_DAYS * DAY).toISOString();
+  const open = (await store.openDiscoverPostings(new Date(now.getTime() - EMAILED_OPEN_FOR_DAYS * DAY).toISOString())).filter(
+    (j) => j.forProfile || (j.lastSeenAt ?? iso) >= boardCutoff,
+  );
 
   // 2. VC boards often leave pay out when the company's own board lists it: look it up there, once
   //    per job, for jobs whose title fits someone.
@@ -202,6 +230,10 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
   }
 
   // 3. Per person: Discover matches (all filters pass, company not on their list), and the digest.
+  //    Emailed jobs at a company on your list that JobSnipe can't check directly go to your Inbox
+  //    instead, with an instant email like any new match.
+  const alerted = await store.alerted();
+  const newAlerts: { profile_id: string; posting_id: string }[] = [];
   for (const person of o.people) {
     const f = filters.get(person.id)!;
     const mine = o.watches.filter((w) => w.profile_id === person.id);
@@ -210,14 +242,36 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
       return c ? [`${c.ats}:${c.board}`] : [];
     }));
     const names = new Set(mine.map((w) => companyKey(w.name)));
-    const passing: { j: DiscoverJob; r: ReturnType<typeof evaluate> }[] = !f.titles.include.length
+    const unmonitored = new Set(mine.filter((w) => w.company_id === null).map((w) => companyKey(w.name)));
+    const all: { j: DiscoverJob; r: ReturnType<typeof evaluate>; onList: boolean }[] = !f.titles.include.length
       ? []
       : open
-          .filter((j) => !onList(j, boards, names))
-          .map((j) => ({ j, r: evaluate(asPosting(j), f, now) }))
+          .filter((j) => !j.forProfile || j.forProfile === person.id)
+          .flatMap((j) => {
+            // An emailed job at a company on your list you can't check directly is one for your Inbox.
+            const inbox = !!j.forProfile && unmonitored.has(companyKey(j.company));
+            return inbox || !onList(j, boards, names) ? [{ j, r: evaluate(asPosting(j), f, now), onList: inbox }] : [];
+          })
           .filter(({ r }) => r.pass);
+    const listed = all.filter((x) => x.onList);
+    const passing = all.filter((x) => !x.onList);
     dedupe(passing);
-    await store.syncDiscoverMatches(person.id, passing.map(({ j, r }) => ({ posting_id: j.id, where_label: r.where ?? null, flags: r.flags })));
+    await store.syncDiscoverMatches(person.id, [
+      ...listed.map(({ j, r }) => ({ posting_id: j.id, where_label: r.where ?? null, flags: r.flags, on_list: true })),
+      ...passing.map(({ j, r }) => ({ posting_id: j.id, where_label: r.where ?? null, flags: r.flags })),
+    ]);
+    for (const { j, r } of listed) {
+      const key = `${person.id}|${j.id}`;
+      if (alerted.has(key)) continue;
+      try {
+        if (!person.alerts_paused) await o.mailer.send(matchEmail(person.email, { ...asPosting(j), company: `${j.company} (${j.via.join(", ")})` }, r, now));
+        alerted.add(key);
+        newAlerts.push({ profile_id: person.id, posting_id: j.id });
+        if (!person.alerts_paused) out.emails++;
+      } catch (e) {
+        out.errors.push(`match email failed: ${o.redact(e instanceof Error ? e.message : String(e))}`);
+      }
+    }
 
     if (!digestDue(person, now)) continue;
     const since = person.last_digest_at ? Date.parse(person.last_digest_at) : 0;
@@ -228,7 +282,7 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
       // Paused or nothing new: no email, but the clock still moves, so the rhythm holds.
       if (fresh.length && !person.alerts_paused) {
         await o.mailer.send(digestEmail(person.email, fresh, person.digest_every ?? "daily", now, DIGEST_MAX));
-        out.digests++;
+        out.emails++;
         log(`  ✉ discover digest sent (${fresh.length} roles)`);
       }
       await store.markDigested(person.id, iso);
@@ -237,5 +291,6 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
       out.errors.push(`digest email failed: ${o.redact(e instanceof Error ? e.message : String(e))}`);
     }
   }
+  await store.recordAlerts(newAlerts);
   return out;
 }

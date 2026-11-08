@@ -231,6 +231,12 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             profile={snap.profile}
             nearMisses={snap.matches.filter((m) => m.nearMiss)}
             discoverSources={snap.discoverSources}
+            inboxEmails={snap.inboxEmails}
+            onInbox={async (on) => {
+              await source.setInbox(on);
+              await reload();
+              flash(on ? 'Your alerts address is ready. Point job alerts at it.' : 'Job-alert inbox turned off.');
+            }}
             onDigest={async (every) => {
               await source.saveProfile({ digest_every: every });
               await reload();

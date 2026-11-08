@@ -74,6 +74,32 @@ under validation" message, that review is why.
 3. Click **Check now**. Within a minute or two you should see matches and get a "JobSnipe is
    watching" email. The run also appears under this repo's Actions tab.
 
+## 5. Job-alert inbox (optional)
+
+Gives each person an address like `7f3k9q2m0a@alerts.joshpetersel.com` to point job alerts at
+(LinkedIn, Indeed, Wellfound, VC boards such as Sequoia's and a16z's). Mail for the subdomain goes to
+Brevo, which hands each email to a small Supabase function; the checker reads them hourly. Your main
+`joshpetersel.com` mail is untouched: only the `alerts.` subdomain changes.
+
+1. **Database:** run `supabase/migrations/0011_email_inbox.sql` (SQL Editor, as in step 2).
+2. **DNS:** where the domain's DNS is managed, add **MX** records for the host `alerts` pointing at
+   Brevo's inbound servers. Brevo's help article "Inbound parsing" lists them (at the time of writing
+   `inbound1.brevo.com` and `inbound2.brevo.com`, priority 10; use whatever Brevo lists now).
+3. **Supabase function:** Edge Functions → **Deploy a new function** → **Via Editor** → name it
+   `inbound-email` → replace the sample code with all of
+   [`supabase/functions/inbound-email/index.ts`](../supabase/functions/inbound-email/index.ts) →
+   Deploy. Then open the function's **Details** and turn **Enforce JWT verification** off (Brevo
+   can't send a Supabase key; the function only files mail for addresses that exist).
+4. **Brevo:** GitHub → Actions → **Set up job-alert inbox** → Run workflow (the subdomain is filled
+   in). If it fails saying the key isn't allowed, make a new Brevo API key with webhook access,
+   replace the `BREVO_API_KEY` secret, and run it again.
+5. **Try it:** JobSnipe → Settings → Job-alert inbox → **Get my alerts address**, then send any email
+   to it. It should appear under "Recent emails" within a minute or two (marked "not read yet" until
+   the next hourly check).
+
+To switch it off for everyone: delete the webhook in Brevo (or the function in Supabase). Each person
+can also turn their own address off in Settings.
+
 ## Checking on it
 
 - **Runs:** this repo → Actions → "Check job boards". Each run's log lists every board and any errors.

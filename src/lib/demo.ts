@@ -1,6 +1,6 @@
 import { probeBoard } from './ats';
 import type { DataSource } from './source';
-import type { Ats, Match, NewWatch, Profile, Run, Snapshot, Verdict, Watch } from './types';
+import type { Ats, InboxEmail, Match, NewWatch, Profile, Run, Snapshot, Verdict, Watch } from './types';
 
 // Fictional companies and roles, so the public demo never shows anyone's real search.
 
@@ -14,6 +14,7 @@ const PROFILE: Profile = {
   alert_mode: 'immediate',
   alerts_paused: false,
   digest_every: 'daily',
+  inbox_token: null,
   criteria: {
     titles: { include: ['product manager', 'head of product'], exclude: ['product marketing', 'intern'] },
     seniority: { require: ['senior', 'staff', 'principal', 'lead', 'group', 'director', 'head'], unlevelled_pay_min: 180000 },
@@ -37,7 +38,13 @@ const MATCHES: Match[] = [
   { id: 'x2', company: 'Quarry Labs', title: 'Staff Product Manager, Developer Tools', url: 'https://jobs.lever.co/quarrylabs/x2', where: 'Remote (US)', flags: ['no pay range listed'], atsPostedAt: iso(50), firstSeenAt: iso(44), via: ['Accel'] },
   { id: 'x3', company: 'Tidewater', title: 'Group Product Manager, Payments', url: 'https://job-boards.greenhouse.io/tidewater/jobs/3', where: 'Toronto area', flags: [], comp: { min: 190000, max: 240000, currency: 'CAD' }, atsPostedAt: iso(80), firstSeenAt: iso(70), via: ['Lux Capital'], ats: 'greenhouse', board: 'tidewater' },
   { id: 'x4', company: 'Fernway', title: 'Senior Product Manager, Workflow Automation', url: 'https://careers.bigco.example/jobs/x4', where: 'NYC area', flags: [], comp: { min: 200000, max: 250000, currency: 'USD' }, atsPostedAt: iso(30), firstSeenAt: iso(28), via: ['Accel'] },
+  { id: 'e1', company: 'Corner Store Co', title: 'Senior Product Manager, Loyalty', url: 'https://www.linkedin.com/jobs/view/4000000001/', where: 'NYC area', flags: ['no pay range listed'], atsPostedAt: iso(5), firstSeenAt: iso(4.5), via: ['LinkedIn alert'], onList: true },
   { id: 'd5', company: 'Northwind Media', title: 'Group Product Manager, Ads', url: 'https://example.com/jobs/5', where: 'Remote (scope unclear)', flags: ["remote, but the allowed countries aren't stated"], comp: { min: 210000, max: 250000, currency: 'USD' }, atsPostedAt: iso(400), firstSeenAt: iso(390) },
+];
+
+const DEMO_EMAILS: InboxEmail[] = [
+  { id: 2, fromName: 'LinkedIn Job Alerts', fromAddress: 'jobalerts-noreply@linkedin.com', subject: '“senior product manager”: 12 new jobs in New York', receivedAt: iso(5), jobsFound: 12 },
+  { id: 1, fromName: 'Gmail Team', fromAddress: 'forwarding-noreply@google.com', subject: 'Gmail Forwarding Confirmation - Receive Mail from you@gmail.com', receivedAt: iso(30), jobsFound: 0, text: 'Confirmation code: 123456789\n\nyou@gmail.com has requested to automatically forward mail to your email address.' },
 ];
 
 const WATCHES: Watch[] = [
@@ -68,6 +75,7 @@ export class DemoSource implements DataSource {
       matches: MATCHES,
       feedback: { ...this.feedback },
       lastRun: { ...this.run },
+      inboxEmails: this.profile.inbox_token ? DEMO_EMAILS : [],
       discoverSources: ['General Catalyst', 'Khosla Ventures', 'Accel', 'Thrive Capital', 'Lux Capital'].map((name) => ({ name, host: '', lastOkAt: iso(2) })),
     };
   }
@@ -100,6 +108,11 @@ export class DemoSource implements DataSource {
 
   async saveProfile(patch: Partial<Profile>) {
     Object.assign(this.profile, patch);
+  }
+
+  async setInbox(on: boolean) {
+    this.profile.inbox_token = on ? 'demo7f3k2q' : null;
+    return this.profile.inbox_token;
   }
 
   async deleteAccount() {

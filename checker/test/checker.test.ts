@@ -514,6 +514,34 @@ describe("discover", () => {
     expect(store.discoverMatches.get(JOSH)!.map((m) => m.posting_id).sort()).toEqual(["d:11", "d:12"]);
   });
 
+  it("reads job-alert emails: your unmonitored companies go to your Inbox, the rest to your Discover only", async () => {
+    const { store, sent, mailer } = setup();
+    store.people_[1].criteria = CRITERIA; // Jake searches the same roles, but these emails are Josh's
+    const row = (title: string, company: string, url: string) => `<a href="${url}">${title}</a><br>${company} · New York, NY<br>`;
+    store.emails.push({
+      id: 7, profile_id: JOSH, from_name: "LinkedIn", from_address: "jobalerts-noreply@linkedin.com", subject: "New jobs", text_body: null,
+      received_at: at(1).toISOString(),
+      html:
+        row("Senior Product Manager", "Corner Store", "https://www.linkedin.com/jobs/view/1/") + // on Josh's list, no board JobSnipe reads
+        row("Staff Product Manager", "Elsewhere Inc", "https://www.linkedin.com/jobs/view/2/") + // not on the list
+        row("Senior Product Manager, Ads", "Acme", "https://www.linkedin.com/jobs/view/3/"), // Acme's board is read directly
+    });
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), now: at(1) });
+
+    expect(store.emails[0]).toMatchObject({ jobs_found: 3, processed_at: at(1).toISOString() });
+    const mine = store.discoverMatches.get(JOSH)!;
+    const title = (id: string) => store.discover.get(id)!.title;
+    expect(mine.filter((m) => m.on_list).map((m) => title(m.posting_id))).toEqual(["Senior Product Manager"]);
+    expect(mine.filter((m) => !m.on_list).map((m) => title(m.posting_id))).toEqual(["Staff Product Manager"]);
+    expect(store.discoverMatches.get(JAKE)).toEqual([]);
+    expect(sent.filter((e) => e.subject.startsWith("New match")).map((e) => e.subject)).toEqual(["New match: Senior Product Manager at Corner Store (LinkedIn alert) (NYC area)"]);
+
+    // Next hour: no second email for the same job; it stays in the Inbox.
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), now: at(2) });
+    expect(sent.filter((e) => e.subject.startsWith("New match"))).toHaveLength(1);
+    expect(store.discoverMatches.get(JOSH)!.filter((m) => m.on_list)).toHaveLength(1);
+  });
+
   it("a broken board is reported without holding anything up", async () => {
     const { store, sent, mailer } = discoverSetup();
     const s = await runCheck({ store, mailer, fetch: async () => ({ postings: [job("1")] }), now: at(1), searchDiscover: async () => { throw new Error("HTTP 503 from https://api.getro.com/x"); } });

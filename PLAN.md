@@ -94,6 +94,11 @@ Places they can surface, and what's built:
   Slack jobs also listed as "Airkit"), with "links to salesforce" when the company and link disagree;
   a filter bar on every list tab (place, minimum pay, keywords with -word to hide, pay listed), and
   Archive all archives just what's in view.
+- **Built (Nov 9, on a branch to try out): job-alert inbox.** Each person can get an address to point
+  LinkedIn, Indeed, Wellfound and VC-board alerts at (the way to cover Consider boards: their search
+  refuses outside requests). Jobs are read from the emails without AI (title link, then company and
+  place); companies on your list that JobSnipe can't check directly go to the Inbox with an email,
+  the rest to Discover. Newsletters need AI: later.
 - **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
   proposals from feedback; "Send to JobBoard".
 - **Text alerts** for people who prefer them (ntfy or Twilio).

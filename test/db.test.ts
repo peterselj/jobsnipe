@@ -259,4 +259,25 @@ describe('database', () => {
       .toEqual(['greenhouse:acme:1', 'kept:1', 'recent:1']);
     await expect(as(JOSH, 'select prune_deleted_verdicts()')).rejects.toThrow(/permission denied/);
   });
+
+  it('0011: an inbox address per person; emails are filed under it and only its owner reads them', async () => {
+    const [{ token }] = await as<{ token: string }>(JOSH, `select set_inbox(true) as token`);
+    expect(token).toMatch(/^[0-9a-f]{10}$/);
+    const file = (t: string) => db.query<{ ok: boolean }>(`select receive_inbound_email($1, 'LinkedIn', 'jobs@linkedin.com', 'New jobs', '<a>x</a>', 'x') as ok`, [t]);
+    expect((await file(token.toUpperCase())).rows).toEqual([{ ok: true }]);
+    expect((await file('nobody')).rows).toEqual([{ ok: false }]);
+    expect(await as(JOSH, 'select subject from inbound_emails')).toEqual([{ subject: 'New jobs' }]);
+    expect(await as(JAKE, 'select * from inbound_emails')).toEqual([]);
+    await expect(as(JOSH, `select receive_inbound_email('${token}', 'x', 'x', 'x', 'x', 'x')`)).rejects.toThrow(/permission denied/);
+    await expect(as(JOSH, `update profiles set inbox_token = 'mine'`)).rejects.toThrow(/permission denied/);
+
+    // Turned off: the old address stops working.
+    expect(await as(JOSH, `select set_inbox(false) as token`)).toEqual([{ token: null }]);
+    expect((await file(token)).rows).toEqual([{ ok: false }]);
+
+    // Emailed jobs are saved as one person's, and Inbox matches are marked.
+    await db.query(`select save_discover_postings($1::jsonb, now())`, [JSON.stringify([{ id: 'e:1', company: 'Corner Store', title: 'Senior PM', url: 'https://x/e1', via: ['LinkedIn alert'], for_profile: JOSH }])]);
+    await db.query(`select sync_discover_matches('${JOSH}', $1::jsonb)`, [JSON.stringify([{ posting_id: 'e:1', where_label: 'NYC area', flags: [], on_list: true }])]);
+    expect(await as(JOSH, `select m.on_list, d.for_profile = '${JOSH}' as mine from discover_matches m join discover_postings d on d.id = m.posting_id where d.id = 'e:1'`)).toEqual([{ on_list: true, mine: true }]);
+  });
 });

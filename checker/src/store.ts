@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { InboundEmail } from "./discover/email.js";
 import type { DiscoverJob, DiscoverSourceRow } from "./discover/types.js";
 import type { Ats, Person, Posting, WatchFilters } from "./types.js";
 
@@ -68,6 +69,8 @@ export interface DiscoverMatchRow {
   posting_id: string;
   where_label: string | null;
   flags: string[];
+  /** At a company on the person's list that JobSnipe can't check directly: shown in the Inbox. */
+  on_list?: boolean;
 }
 
 export interface RunSummary {
@@ -109,6 +112,9 @@ export interface Store {
   markDigested(profileId: string, at: string): Promise<void>;
   /** Pay looked up on the company's own board (undefined: it lists none). */
   saveDiscoverPay(rows: { id: string; comp?: Posting["comp"] }[]): Promise<void>;
+  /** Job-alert emails not read yet, oldest first. */
+  unreadEmails(): Promise<InboundEmail[]>;
+  markEmailsRead(rows: { id: number; jobs_found: number }[], at: string): Promise<void>;
 }
 
 const DAY = 86_400_000;
@@ -262,6 +268,7 @@ export class SupabaseStore implements Store {
     this.check(await this.db.rpc("prune_unwatched_boards"), "prune unwatched boards");
     this.check(await this.db.from("discover_postings").delete().lt("last_seen_at", before(30)), "prune discover postings");
     this.check(await this.db.rpc("prune_deleted_verdicts"), "prune deleted archive notes");
+    this.check(await this.db.from("inbound_emails").delete().lt("received_at", before(60)), "prune inbox emails");
   }
 
   async discoverSources() {
@@ -277,6 +284,7 @@ export class SupabaseStore implements Store {
       id: j.id, company: j.company, title: j.title, locations: j.locations, workplace: j.workplace ?? null, url: j.url,
       posted_at: j.postedAt ?? null, comp_min: j.comp ? Math.round(j.comp.min) : null, comp_max: j.comp ? Math.round(j.comp.max) : null,
       comp_currency: j.comp?.currency ?? null, ats: j.ats ?? null, board: j.board ?? null, via: j.via,
+      for_profile: j.forProfile ?? null,
     }));
     for (let i = 0; i < rows.length; i += 500) {
       this.check(await this.db.rpc("save_discover_postings", { p_rows: rows.slice(i, i + 500), p_at: at }), "save discover postings");
@@ -291,6 +299,7 @@ export class SupabaseStore implements Store {
       id: r.id, company: r.company, title: r.title, locations: r.locations ?? [], workplace: r.workplace ?? undefined, url: r.url,
       postedAt: r.posted_at ?? undefined, comp: compOf(r), ats: r.ats ?? undefined, board: r.board ?? undefined,
       via: r.via ?? [], firstSeenAt: r.first_seen_at, compChecked: !!r.comp_checked,
+      forProfile: r.for_profile ?? undefined, lastSeenAt: r.last_seen_at,
     }));
   }
 
@@ -302,6 +311,19 @@ export class SupabaseStore implements Store {
     for (const { id, comp } of rows) {
       const pay = { comp_min: comp ? Math.round(comp.min) : null, comp_max: comp ? Math.round(comp.max) : null, comp_currency: comp?.currency ?? null };
       this.check(await this.db.from("discover_postings").update({ ...pay, comp_checked: true }).eq("id", id), "save discover pay");
+    }
+  }
+
+  async unreadEmails() {
+    return this.check(
+      await this.db.from("inbound_emails").select("id, profile_id, from_name, from_address, subject, html, text_body, received_at").is("processed_at", null).order("received_at").limit(200),
+      "load inbox emails",
+    ) as InboundEmail[];
+  }
+
+  async markEmailsRead(rows: { id: number; jobs_found: number }[], at: string) {
+    for (const r of rows) {
+      this.check(await this.db.from("inbound_emails").update({ processed_at: at, jobs_found: r.jobs_found }).eq("id", r.id), "mark inbox email read");
     }
   }
 

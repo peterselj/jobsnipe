@@ -31,10 +31,13 @@ const DAY = 86_400_000;
 
 const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+const JOB_SITES = new Set(['linkedin', 'indeed', 'wellfound', 'angel', 'glassdoor', 'ziprecruiter']);
+
 /** When a VC board files a job under one company but its link goes to another (e.g. one that bought it). */
 function linksElsewhere(m: Match): string | undefined {
   const owner = m.url ? linkOwner(m.url) : undefined;
-  if (!owner) return undefined;
+  // Job sites (where alert emails link) aren't the employer, so a mismatch there means nothing.
+  if (!owner || JOB_SITES.has(owner)) return undefined;
   const a = squash(owner);
   const b = squash(m.company);
   return a && b && !a.includes(b) && !b.includes(a) ? owner : undefined;
@@ -69,11 +72,13 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
   const [showOlder, setShowOlder] = useState(false);
   const open = new Map(matches.map((m) => [m.id, m]));
 
-  const inbox = matches.filter((m) => !m.nearMiss && !m.via && !feedback[m.id]);
+  // Inbox: new matches on your list, including roles from your job-alert emails at companies on your
+  // list that JobSnipe can't check directly.
+  const inbox = matches.filter((m) => !m.nearMiss && (!m.via || m.onList) && !feedback[m.id]);
   // Near misses: right job family, missed by one filter. Marking one Interested moves it to Interested.
   const near = matches.filter((m) => m.nearMiss && !feedback[m.id]);
   // Discover: the opposite of a near miss. Every filter passes, but the company isn't on your list.
-  const discover = matches.filter((m) => m.via && !feedback[m.id]);
+  const discover = matches.filter((m) => m.via && !m.onList && !feedback[m.id]);
   const viaCounts = new Map<string, number>();
   for (const m of discover) for (const v of m.via!) viaCounts.set(v, (viaCounts.get(v) ?? 0) + 1);
   const missCounts = near.reduce<Partial<Record<MissCheck, number>>>((acc, m) => ({ ...acc, [m.nearMiss!]: (acc[m.nearMiss!] ?? 0) + 1 }), {});
@@ -379,7 +384,7 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           {m.flags.length > 0 && <div className="mt-1 text-[13px] text-gold">⚑ {m.flags.join(' · ')}</div>}
           {m.via && !verdict && (
             <div className="mt-1 text-[12px] text-muted">
-              via {m.via.join(', ')} · not on your list
+              via {m.via.join(', ')}{m.onList ? '' : ' · not on your list'}
               {linksElsewhere(m) && <> · <span className="text-gold">links to {linksElsewhere(m)}</span></>}
             </div>
           )}
@@ -403,7 +408,7 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
                 <Button size="sm" onClick={() => decide('interested')}>{m.nearMiss ? '★ Interested anyway' : '★ Interested'}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>Not for me</Button>
                 <Button size="sm" variant="ghost" onClick={archive} title="Not worth deciding (e.g. stale): archive it so it never comes back">Archive</Button>
-                {m.via && (
+                {m.via && !m.onList && (
                   <Button size="sm" variant="ghost" onClick={watch} disabled={watching} title="Add this company to your list: its new roles are checked hourly and emailed">
                     {watching ? 'Adding…' : '+ Watch company'}
                   </Button>

@@ -294,7 +294,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     //    holds up your own list, which is done by now.
     try {
       const d = await runDiscover({ store, mailer, people, watches, companies, now, search: opts.searchDiscover, lookupPay: opts.lookupDiscoverPay, log, redact });
-      summary.alerts_sent += d.digests;
+      summary.alerts_sent += d.emails;
       summary.errors.push(...d.errors);
     } catch (e) {
       summary.errors.push(`discover failed: ${redact(msg(e))}`);
