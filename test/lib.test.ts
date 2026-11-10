@@ -122,3 +122,38 @@ describe('title entries that are too broad', () => {
     expect(tooBroadTitles(undefined)).toEqual([]);
   });
 });
+
+describe('SmartRecruiters and Recruitee links, and Discover filters', () => {
+  it('recognizes the new boards from their links', () => {
+    expect(parseBoardUrl('https://jobs.smartrecruiters.com/AcmeInc/744000012345-senior-product-manager')).toEqual({ ats: 'smartrecruiters', board: 'AcmeInc' });
+    expect(parseBoardUrl('careers.smartrecruiters.com/AcmeInc')).toEqual({ ats: 'smartrecruiters', board: 'AcmeInc' });
+    expect(parseBoardUrl('https://api.smartrecruiters.com/v1/companies/AcmeInc/postings')).toEqual({ ats: 'smartrecruiters', board: 'AcmeInc' });
+    expect(parseBoardUrl('https://acme.recruitee.com/o/senior-pm')).toEqual({ ats: 'recruitee', board: 'acme' });
+    expect(parseBoardUrl('https://www.recruitee.com/pricing')).toBeUndefined();
+    expect(boardUrl('smartrecruiters', 'AcmeInc')).toBe('https://jobs.smartrecruiters.com/AcmeInc');
+    expect(boardUrl('recruitee', 'acme')).toBe('https://acme.recruitee.com');
+    expect(boardUrl('recruitee', 'evil.example.com/x')).toBe('https://recruitee.com');
+  });
+
+  it('a pasted SmartRecruiters link shows how many jobs are there; a Recruitee link is taken as given', async () => {
+    const asked: string[] = [];
+    const fake = (async (url: string) => {
+      asked.push(url);
+      return Response.json({ totalFound: 42, content: [{ name: 'Senior PM', company: { name: 'Acme Inc' } }] });
+    }) as unknown as typeof fetch;
+    expect(await findBoards('https://jobs.smartrecruiters.com/AcmeInc/744-senior-pm', fake)).toEqual([{ ats: 'smartrecruiters', board: 'AcmeInc', jobs: 42, sample: ['Senior PM'], displayName: 'Acme Inc' }]);
+    expect(await findBoards('https://acme.recruitee.com/o/x', fake)).toEqual([{ ats: 'recruitee', board: 'acme', sample: [] }]);
+    expect(asked).toEqual(['https://api.smartrecruiters.com/v1/companies/AcmeInc/postings?limit=3']);
+  });
+
+  it('Discover filters skip the industries and stages you name', async () => {
+    const { discoverSkip, stageLabel } = await import('../shared/criteria');
+    const f = { skip_industries: ['biotech', ' Pharma '], skip_stages: ['pre_seed'] };
+    expect(discoverSkip(f, { stage: 'series_b', industries: ['Biotechnology', 'Health Care'] })).toBe('industry: Biotechnology');
+    expect(discoverSkip(f, { stage: 'pre_seed', industries: ['Fintech'] })).toBe('stage: Pre-seed');
+    expect(discoverSkip(f, { stage: 'series_b', industries: ['Fintech'] })).toBeUndefined();
+    expect(discoverSkip(f, {})).toBeUndefined(); // jobs from alert emails say neither
+    expect(discoverSkip(undefined, { stage: 'pre_seed' })).toBeUndefined();
+    expect([stageLabel('series_b'), stageLabel('ipo'), stageLabel('seed')]).toEqual(['Series B', 'Public (IPO)', 'Seed']);
+  });
+});

@@ -1,6 +1,18 @@
 // Job-board helpers shared by the page (src/) and the checker (checker/).
 
-export type Ats = 'greenhouse' | 'lever' | 'ashby' | 'workday';
+export type Ats = 'greenhouse' | 'lever' | 'ashby' | 'workday' | 'smartrecruiters' | 'recruitee';
+
+/**
+ * A SmartRecruiters board is the company's identifier as it appears in its job links
+ * (jobs.smartrecruiters.com/AcmeInc/...).
+ */
+export const SMARTRECRUITERS_BOARD = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
+
+/**
+ * A Recruitee board is the first part of the company's Recruitee address (acme.recruitee.com). The
+ * checker fetches from that host, so only a plain name is ever accepted.
+ */
+export const RECRUITEE_BOARD = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 /**
  * A Workday board is stored as "host/tenant/site", e.g.
@@ -43,6 +55,10 @@ export function boardUrl(ats: Ats, board: string): string {
       const b = parseWorkdayBoard(board);
       return b ? workdaySiteUrl(b) : `https://${board.split('/')[0]}`;
     }
+    case 'smartrecruiters':
+      return `https://jobs.smartrecruiters.com/${encodeURIComponent(board)}`;
+    case 'recruitee':
+      return RECRUITEE_BOARD.test(board) ? `https://${board}.recruitee.com` : 'https://recruitee.com';
   }
 }
 
@@ -53,9 +69,11 @@ export function boardLabel(ats: Ats, board: string): string {
   return b ? `${b.tenant} / ${b.site}` : board;
 }
 
-export const ATS_LABEL: Record<Ats, string> = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday' };
+export const ATS_LABEL: Record<Ats, string> = {
+  greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workday: 'Workday', smartrecruiters: 'SmartRecruiters', recruitee: 'Recruitee',
+};
 
-/** The boards a company name can be looked up on (Workday needs a link). */
+/** The boards a company name can be looked up on (the others need one of the company's job links). */
 export const GUESSABLE_ATS: Ats[] = ['greenhouse', 'lever', 'ashby'];
 
 function toUrl(input: string): URL | undefined {
@@ -86,6 +104,17 @@ export function parseBoardUrl(input: string): { ats: Ats; board: string } | unde
   if (host === 'jobs.ashbyhq.com') return parts[0] ? { ats: 'ashby', board: parts[0] } : undefined;
   if (host === 'api.ashbyhq.com' && parts[0] === 'posting-api') {
     return parts[2] ? { ats: 'ashby', board: parts[2] } : undefined;
+  }
+  // jobs.smartrecruiters.com/AcmeInc/744000…-senior-pm, careers.smartrecruiters.com/AcmeInc,
+  // api.smartrecruiters.com/v1/companies/AcmeInc/postings
+  if (host === 'jobs.smartrecruiters.com' || host === 'careers.smartrecruiters.com' || host === 'api.smartrecruiters.com') {
+    const board = host === 'api.smartrecruiters.com' ? (parts[1] === 'companies' ? parts[2] : undefined) : parts[0];
+    return board && SMARTRECRUITERS_BOARD.test(board) ? { ats: 'smartrecruiters', board } : undefined;
+  }
+  // acme.recruitee.com/o/senior-pm (a company's own careers address in front of it can't be told apart)
+  if (host.endsWith('.recruitee.com')) {
+    const board = host.slice(0, -'.recruitee.com'.length);
+    return RECRUITEE_BOARD.test(board) && !['www', 'api', 'app', 'careers', 'help', 'support'].includes(board) ? { ats: 'recruitee', board } : undefined;
   }
   return parseWorkdayUrl(host, parts);
 }

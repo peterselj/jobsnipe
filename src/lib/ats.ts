@@ -8,6 +8,12 @@ export { ATS_LABEL, boardLabel, boardUrl, companyFromSiteUrl, looksLikeUrl, pars
 // so the page can find a company's board without a server. Workday doesn't, so a Workday link is
 // taken as given and the checker reads it as soon as it's added.
 
+/**
+ * Workday and Recruitee don't let a web page ask them anything (only the checker can read them), so
+ * their links are taken on trust.
+ */
+export const pageCanRead = (ats: Ats) => ats !== 'workday' && ats !== 'recruitee';
+
 export interface BoardHit {
   ats: Ats;
   board: string;
@@ -32,7 +38,13 @@ async function getJson(url: string, fetchImpl: typeof fetch): Promise<any | unde
 
 export async function probeBoard(ats: Ats, board: string, fetchImpl: typeof fetch = fetch.bind(globalThis), jobId?: string): Promise<BoardHit | undefined> {
   const b = encodeURIComponent(board);
-  if (ats === 'workday') return undefined;
+  if (!pageCanRead(ats)) return undefined;
+  if (ats === 'smartrecruiters') {
+    const d = await getJson(`https://api.smartrecruiters.com/v1/companies/${b}/postings?limit=3`, fetchImpl);
+    if (!Array.isArray(d?.content)) return undefined;
+    // SmartRecruiters answers "no jobs" for a company it doesn't know too, so 0 proves nothing.
+    return { ats, board, jobs: d.totalFound ?? d.content.length, sample: d.content.map((j: any) => j.name), displayName: d.content[0]?.company?.name };
+  }
   if (ats === 'greenhouse') {
     const d = await getJson(`https://boards-api.greenhouse.io/v1/boards/${b}/jobs`, fetchImpl);
     if (!d?.jobs) return undefined;
@@ -57,7 +69,11 @@ export async function probeBoard(ats: Ats, board: string, fetchImpl: typeof fetc
  */
 export async function findBoards(input: string, fetchImpl: typeof fetch = fetch.bind(globalThis)): Promise<BoardHit[]> {
   const fromUrl = parseBoardUrl(input);
-  if (fromUrl?.ats === 'workday') return [{ ...fromUrl, sample: [] }];
+  // Boards that only come from a link are taken as given (the checker reads them once added); where
+  // the page can look, it shows how many jobs are there.
+  if (fromUrl && !GUESSABLE_ATS.includes(fromUrl.ats)) {
+    return [(await probeBoard(fromUrl.ats, fromUrl.board, fetchImpl)) ?? { ...fromUrl, sample: [] }];
+  }
   const name = fromUrl ? undefined : companyFromSiteUrl(input) ?? input;
   const job = fromUrl ? undefined : jobIdFromUrl(input);
   const tries = fromUrl ? [fromUrl] : slugCandidates(name!).flatMap((board) => GUESSABLE_ATS.map((ats) => ({ ats, board })));

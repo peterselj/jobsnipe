@@ -12,6 +12,31 @@ export interface Criteria {
   comp_floor?: Record<string, number>;
   /** Skip roles posted longer ago than this many days. Unset = any age. */
   max_age_days?: number;
+  /** Extra filters for Discover only, from what VC boards say about each company. */
+  discover?: DiscoverFilters;
+}
+
+export interface DiscoverFilters {
+  /** Skip companies in industries containing any of these words ("biotech" also skips "Biotechnology"). */
+  skip_industries?: string[];
+  /** Skip companies at these funding stages, as the VC boards name them ("pre_seed", "ipo"). */
+  skip_stages?: string[];
+}
+
+/** Why Discover should leave a company's roles out, or undefined to keep them. */
+export function discoverSkip(f: DiscoverFilters | undefined, company: { stage?: string; industries?: string[] }): string | undefined {
+  if (!f) return undefined;
+  if (company.stage && (f.skip_stages ?? []).includes(company.stage)) return `stage: ${stageLabel(company.stage)}`;
+  const words = (f.skip_industries ?? []).map((w) => w.trim().toLowerCase()).filter(Boolean);
+  const hit = (company.industries ?? []).find((i) => words.some((w) => i.toLowerCase().includes(w)));
+  return hit ? `industry: ${hit}` : undefined;
+}
+
+/** "series_b" -> "Series B", "ipo" -> "Public (IPO)", "pre_seed" -> "Pre-seed". */
+export function stageLabel(stage: string): string {
+  if (stage === 'ipo') return 'Public (IPO)';
+  if (stage === 'pre_seed') return 'Pre-seed';
+  return stage.split('_').map((w) => (w.length === 1 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1))).join(' ');
 }
 
 /**

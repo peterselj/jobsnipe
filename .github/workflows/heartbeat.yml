@@ -1,0 +1,30 @@
+name: Heartbeat
+
+# Makes sure the hourly check is still running. It runs on GitHub's own clock, separate from the
+# Supabase timer that normally starts checks. If no check has finished in 3 hours, or only the backup
+# schedule is starting them, this run fails, and GitHub emails you about the failure (GitHub →
+# Settings → Notifications → Actions: "Send notifications for failed workflows only").
+on:
+  schedule:
+    - cron: "38 */4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Is the hourly check running?
+        run: npx tsx checker/src/heartbeat.ts
+        env:
+          SUPABASE_URL: https://hzeciyeirloyzqkjvvln.supabase.co
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}

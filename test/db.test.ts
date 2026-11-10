@@ -236,7 +236,7 @@ describe('database', () => {
     await as(JOSH, `select add_watch('Nvidia', 'workday', 'nvidia.wd5.myworkdayjobs.com/nvidia/NVIDIAExternalCareerSite')`);
     expect((await db.query(`select board from companies where ats = 'workday'`)).rows).toEqual([{ board: 'nvidia.wd5.myworkdayjobs.com/nvidia/NVIDIAExternalCareerSite' }]);
     await expect(as(JOSH, `select add_watch('Evil', 'workday', 'evil.example.com/a/b')`)).rejects.toThrow(/companies_workday_board_check/);
-    await expect(as(JOSH, `select add_watch('Other', 'smartrecruiters', 'acme')`)).rejects.toThrow(/companies_ats_check/);
+    await expect(as(JOSH, `select add_watch('Other', 'bamboohr', 'acme')`)).rejects.toThrow(/companies_ats_check/);
     await db.exec(`delete from watches where company_id in (select id from companies where ats = 'workday'); delete from companies where ats = 'workday';`);
   });
 
@@ -320,5 +320,20 @@ describe('database', () => {
     await as(JOSH, `insert into verdicts (profile_id, posting_id, verdict, url) values ('${JOSH}', 'manual:1', 'interested', 'https://www.linkedin.com/jobs/view/1/')`);
     await expect(as(JOSH, `update profiles set criteria = jsonb_build_object('x', repeat('y', 30000))`)).rejects.toThrow(/profiles_criteria_size/);
     await expect(db.exec(`insert into discover_postings (id, company, title, url) values ('d:bad', 'X', 'Y', 'data:text/html,hi')`)).rejects.toThrow(/discover_postings_url_web/);
+  });
+
+  it('0013: SmartRecruiters and Recruitee boards, only with plain names; Discover keeps stage and industries', async () => {
+    await as(JAKE, `select add_watch('Acme', 'smartrecruiters', 'AcmeInc')`);
+    await as(JAKE, `select add_watch('Bunq', 'recruitee', 'bunq')`);
+    await expect(as(JAKE, `select add_watch('Evil', 'recruitee', 'evil.example.com/x')`)).rejects.toThrow(/companies_recruitee_board_check/);
+    await expect(as(JAKE, `select add_watch('Evil', 'recruitee', 'Acme')`)).rejects.toThrow(/companies_recruitee_board_check/);
+    await expect(as(JAKE, `select add_watch('Evil', 'smartrecruiters', 'a/b')`)).rejects.toThrow(/companies_smartrecruiters_board_check/);
+    await expect(as(JAKE, `select add_watch('Other', 'workable', 'acme')`)).rejects.toThrow(/companies_ats_check/);
+    await db.exec(`delete from watches where profile_id = '${JAKE}' and name in ('Acme', 'Bunq'); select prune_unwatched_boards();`);
+
+    const row = (extra: object) => JSON.stringify([{ id: 'd:stage', company: 'Genewave', title: 'Senior PM', url: 'https://x/s', via: ['Board A'], ...extra }]);
+    await db.query(`select save_discover_postings($1::jsonb, now())`, [row({ stage: 'series_b', industries: ['Biotechnology', 'Health Care'] })]);
+    await db.query(`select save_discover_postings($1::jsonb, now())`, [row({})]); // a later read without them keeps what's known
+    expect((await db.query(`select stage, industries from discover_postings where id = 'd:stage'`)).rows).toEqual([{ stage: 'series_b', industries: ['Biotechnology', 'Health Care'] }]);
   });
 });

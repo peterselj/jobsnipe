@@ -65,7 +65,7 @@ export class SupabaseSource implements DataSource {
       this.latestRun(),
       this.db
         .from('discover_matches')
-        .select('where_label, flags, on_list, discover_postings(id, company, title, url, posted_at, comp_min, comp_max, comp_currency, ats, board, via, first_seen_at)')
+        .select('where_label, flags, on_list, discover_postings(id, company, title, url, posted_at, comp_min, comp_max, comp_currency, ats, board, via, stage, industries, first_seen_at)')
         .limit(2000),
       this.db.from('discover_sources').select('name, host, last_ok_at, last_error, enabled').order('id'),
       this.db.from('inbound_emails').select('id, from_name, from_address, subject, received_at, jobs_found, text_body').order('received_at', { ascending: false }).limit(10),
@@ -132,6 +132,8 @@ export class SupabaseSource implements DataSource {
           firstSeenAt: p.first_seen_at,
           via: p.via ?? [],
           onList: !!m.on_list,
+          stage: p.stage ?? undefined,
+          industries: p.industries ?? [],
           ats: p.ats ?? undefined,
           board: p.board ?? undefined,
         };

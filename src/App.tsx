@@ -254,6 +254,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
           <Settings
             profile={snap.profile}
             nearMisses={snap.matches.filter((m) => m.nearMiss)}
+            discoverRoles={snap.matches.filter((m) => m.via && !m.onList)}
             discoverSources={snap.discoverSources}
             inboxEmails={snap.inboxEmails}
             onInbox={async (on) => {

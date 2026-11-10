@@ -1,4 +1,4 @@
-import { probeBoard } from './ats';
+import { pageCanRead, probeBoard } from './ats';
 import type { DataSource } from './source';
 import type { Ats, InboxEmail, Match, NewWatch, Profile, Run, Snapshot, Verdict, Watch } from './types';
 
@@ -34,9 +34,9 @@ const MATCHES: Match[] = [
   { id: 'd7', company: 'Northwind Media', title: 'Staff Product Manager, Search', url: 'https://example.com/jobs/7', flags: [], comp: { min: 220000, max: 260000, currency: 'USD' }, atsPostedAt: iso(50), firstSeenAt: iso(49), nearMiss: 'location', missDetail: 'San Francisco, CA' },
   { id: 'd8', company: 'Brightpath', title: 'Product Manager, Onboarding', url: 'https://example.com/jobs/8', where: 'Remote (US)', flags: [], comp: { min: 130000, max: 150000, currency: 'USD' }, atsPostedAt: iso(80), firstSeenAt: iso(79), nearMiss: 'seniority', missDetail: 'No senior level in the title' },
   { id: 'd9', company: 'Halcyon AI', title: 'Lead Product Manager, Growth', url: 'https://example.com/jobs/9', where: 'NYC area', flags: [], comp: { min: 200000, max: 240000, currency: 'USD' }, atsPostedAt: iso(340 * 24), firstSeenAt: iso(300), nearMiss: 'age', missDetail: 'Posted 340 days ago (your limit: 60)' },
-  { id: 'x1', company: 'Lumen Health', title: 'Senior Product Manager, Patient Experience', url: 'https://jobs.ashbyhq.com/lumenhealth/x1', where: 'NYC area', flags: [], comp: { min: 185000, max: 225000, currency: 'USD' }, atsPostedAt: iso(26), firstSeenAt: iso(20), via: ['General Catalyst', 'Thrive Capital'], ats: 'ashby', board: 'lumenhealth' },
-  { id: 'x2', company: 'Quarry Labs', title: 'Staff Product Manager, Developer Tools', url: 'https://jobs.lever.co/quarrylabs/x2', where: 'Remote (US)', flags: ['no pay range listed'], atsPostedAt: iso(50), firstSeenAt: iso(44), via: ['Accel'] },
-  { id: 'x3', company: 'Tidewater', title: 'Group Product Manager, Payments', url: 'https://job-boards.greenhouse.io/tidewater/jobs/3', where: 'Toronto area', flags: [], comp: { min: 190000, max: 240000, currency: 'CAD' }, atsPostedAt: iso(80), firstSeenAt: iso(70), via: ['Lux Capital'], ats: 'greenhouse', board: 'tidewater' },
+  { id: 'x1', company: 'Lumen Health', title: 'Senior Product Manager, Patient Experience', url: 'https://jobs.ashbyhq.com/lumenhealth/x1', where: 'NYC area', flags: [], comp: { min: 185000, max: 225000, currency: 'USD' }, atsPostedAt: iso(26), firstSeenAt: iso(20), via: ['General Catalyst', 'Thrive Capital'], ats: 'ashby', board: 'lumenhealth', stage: 'series_b', industries: ['Health Care', 'Biotechnology'] },
+  { id: 'x2', company: 'Quarry Labs', title: 'Staff Product Manager, Developer Tools', url: 'https://jobs.lever.co/quarrylabs/x2', where: 'Remote (US)', flags: ['no pay range listed'], atsPostedAt: iso(50), firstSeenAt: iso(44), via: ['Accel'], stage: 'seed', industries: ['Developer Tools', 'SaaS'] },
+  { id: 'x3', company: 'Tidewater', title: 'Group Product Manager, Payments', url: 'https://job-boards.greenhouse.io/tidewater/jobs/3', where: 'Toronto area', flags: [], comp: { min: 190000, max: 240000, currency: 'CAD' }, atsPostedAt: iso(80), firstSeenAt: iso(70), via: ['Lux Capital'], ats: 'greenhouse', board: 'tidewater', stage: 'ipo', industries: ['Fintech', 'Payments'] },
   { id: 'x4', company: 'Fernway', title: 'Senior Product Manager, Workflow Automation', url: 'https://careers.bigco.example/jobs/x4', where: 'NYC area', flags: [], comp: { min: 200000, max: 250000, currency: 'USD' }, atsPostedAt: iso(30), firstSeenAt: iso(28), via: ['Accel'] },
   { id: 'e1', company: 'Corner Store Co', title: 'Senior Product Manager, Loyalty', url: 'https://www.linkedin.com/jobs/view/4000000001/', where: 'NYC area', flags: ['no pay range listed'], atsPostedAt: iso(5), firstSeenAt: iso(4.5), via: ['LinkedIn alert'], onList: true },
   { id: 'd5', company: 'Northwind Media', title: 'Group Product Manager, Ads', url: 'https://example.com/jobs/5', where: 'Remote (scope unclear)', flags: ["remote, but the allowed countries aren't stated"], comp: { min: 210000, max: 250000, currency: 'USD' }, atsPostedAt: iso(400), firstSeenAt: iso(390) },
@@ -130,8 +130,8 @@ export class DemoSource implements DataSource {
     const pending = this.watches.filter((w) => w.status === 'pending' && w.ats !== 'none');
     void Promise.all(
       pending.map(async (w) => {
-        // The page can't read Workday boards (only the checker can), so the demo takes them on trust.
-        const hit = w.ats === 'workday' ? { jobs: undefined } : await probeBoard(w.ats as Ats, w.board!);
+        // Boards the page can't read (only the checker can) are taken on trust in the demo.
+        const hit = !pageCanRead(w.ats as Ats) ? { jobs: undefined } : await probeBoard(w.ats as Ats, w.board!);
         Object.assign(w, hit
           ? { status: 'ok', openPostings: hit.jobs, lastCheckedAt: new Date().toISOString(), lastError: undefined }
           : { status: 'failing', lastCheckedAt: new Date().toISOString(), lastError: "Couldn't read that board" });

@@ -564,6 +564,21 @@ describe("discover", () => {
     expect(store.discoverMatches.get(JOSH)!.filter((m) => m.on_list)).toHaveLength(1);
   });
 
+  it("leaves out industries and company stages you chose to skip, in Discover only", async () => {
+    const { store, sent, mailer, searchDiscover, setBoards } = discoverSetup();
+    store.people_[0].criteria = { ...CRITERIA, discover: { skip_industries: ["biotech"], skip_stages: ["pre_seed"] } };
+    setBoards({
+      "Board A": [
+        dj("d:20", { company: "Genewave", stage: "series_b", industries: ["Biotechnology"] }),
+        dj("d:21", { company: "Tinyco", stage: "pre_seed", industries: ["SaaS"] }),
+        dj("d:22", { company: "Paywell", stage: "series_b", industries: ["Fintech"] }),
+      ],
+    });
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(1) });
+    expect(store.discoverMatches.get(JOSH)!.map((m) => m.posting_id)).toEqual(["d:22"]);
+    expect(sent.find((e) => e.subject.startsWith("Discover"))!.text).not.toMatch(/Genewave|Tinyco/);
+  });
+
   it("a broken board is reported without holding anything up", async () => {
     const { store, sent, mailer } = discoverSetup();
     const s = await runCheck({ store, mailer, fetch: async () => ({ postings: [job("1")] }), now: at(1), searchDiscover: async () => { throw new Error("HTTP 503 from https://api.getro.com/x"); } });

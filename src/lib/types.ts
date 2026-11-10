@@ -47,6 +47,9 @@ export interface Match {
   via?: string[];
   /** From your job-alert emails, at a company on your list JobSnipe can't check directly: an Inbox role. */
   onList?: boolean;
+  /** Discover: what the VC board says about the company. */
+  stage?: string;
+  industries?: string[];
   /** The company's own board, when known (for "Watch this company"). */
   ats?: Ats;
   board?: string;
