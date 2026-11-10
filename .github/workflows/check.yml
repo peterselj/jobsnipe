@@ -30,8 +30,12 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Check boards and send alerts
-        run: npm run check -- --trigger "${{ inputs.reason || 'backup schedule' }}"
+        # The reason comes from outside (the page's "Check now" passes it along), so it reaches the
+        # command as a variable, never pasted into the script text: pasted in, a crafted reason could
+        # run its own commands here, next to the keys below.
+        run: npm run check -- --trigger "$REASON"
         env:
+          REASON: ${{ inputs.reason || 'backup schedule' }}
           SUPABASE_URL: https://hzeciyeirloyzqkjvvln.supabase.co
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
