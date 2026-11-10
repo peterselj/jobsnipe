@@ -3,6 +3,7 @@ import { stageLabel, tooBroadTitles } from '../../shared/criteria';
 import { money } from '../../shared/format';
 import { INBOX_DOMAIN } from '../lib/inbox';
 import type { Suggestion } from '../lib/suggest';
+import { JOBBOARD } from '../lib/jobboard';
 import type { Criteria, DigestEvery, DiscoverSource, InboxEmail, Match, Profile } from '../lib/types';
 import { Button, Field, Input, SectionHeader } from './ui';
 
@@ -40,7 +41,7 @@ function missedPlaces(nearMisses: Match[]): [string, number][] {
 }
 
 /** Name, alert email, filters, pausing, and deleting the account. Saving re-checks right away. */
-export default function Settings({ profile, nearMisses, discoverRoles, discoverSources, inboxEmails, suggestions, onSave, onPause, onDigest, onInbox, onAcceptSuggestion, onDismissSuggestion, onDelete, onCancel }: {
+export default function Settings({ profile, nearMisses, discoverRoles, discoverSources, inboxEmails, suggestions, jobBoard, onSave, onPause, onDigest, onInbox, onJobBoard, onAcceptSuggestion, onDismissSuggestion, onDelete, onCancel }: {
   profile: Profile;
   /** Roles in Discover right now, for suggesting industries and stages to skip. */
   discoverRoles: Match[];
@@ -51,6 +52,9 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
   suggestions: Suggestion[];
   onAcceptSuggestion: (s: Suggestion) => Promise<void>;
   onDismissSuggestion: (s: Suggestion) => Promise<void>;
+  /** Whether "Send to JobBoard" is on in this browser. */
+  jobBoard: boolean;
+  onJobBoard: (on: boolean) => void;
   onDigest: (every: DigestEvery) => Promise<void>;
   /** Roles the current filters hid for one reason; used to show what each filter is costing. */
   nearMisses: Match[];
@@ -143,6 +147,17 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
       <PauseCard paused={profile.alerts_paused} onPause={onPause} />
       <DigestCard every={profile.digest_every} sources={discoverSources} onChange={onDigest} />
       <InboxCard token={profile.inbox_token ?? null} emails={inboxEmails} onSet={onInbox} />
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-white p-5">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-bold">Send to JobBoard is {jobBoard ? 'on' : 'off'}</div>
+          <p className="text-sm text-muted">
+            Adds a “→ JobBoard” button to ★ Interested roles. It opens{' '}
+            <a className="text-forest underline-offset-2 hover:underline" href={JOBBOARD} target="_blank" rel="noreferrer">JobBoard</a>, a
+            referral-first tracker for the roles you're pursuing, with the role filled in. Remembered in this browser only.
+          </p>
+        </div>
+        <Button variant="secondary" onClick={() => onJobBoard(!jobBoard)}>{jobBoard ? 'Turn off' : 'Turn on'}</Button>
+      </div>
 
       <div className={card}>
         <SectionHeader title="You" />

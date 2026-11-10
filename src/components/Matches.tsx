@@ -4,6 +4,7 @@ import { stageLabel } from '../../shared/criteria';
 import { safeHttpUrl } from '../../shared/url';
 import { ago, money } from '../../shared/format';
 import { isManual } from '../lib/addRole';
+import { jobBoardLink } from '../lib/jobboard';
 import { postingDescription, postingForResume, resumeMachineLink } from '../lib/posting';
 import type { DigestEvery, DiscoverSource, Feedback, Match, NewWatch, Verdict } from '../lib/types';
 import FindBoard from './FindBoard';
@@ -31,6 +32,8 @@ interface Props {
   digestEvery: DigestEvery;
   /** How many filter suggestions are waiting in Settings. */
   suggestions?: number;
+  /** Show "→ JobBoard" on Interested roles (opt-in, Settings). */
+  jobBoard?: boolean;
 }
 
 const DAY = 86_400_000;
@@ -71,7 +74,7 @@ const ARCHIVE_RECENT_DAYS = 30;
  * good, so it never comes back. Decided and archived roles are read from the saved verdicts, so
  * they stay listed after the posting closes.
  */
-export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings, onWatch, discoverSources, digestEvery, suggestions }: Props) {
+export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings, onWatch, discoverSources, digestEvery, suggestions, jobBoard }: Props) {
   const [folder, setFolder] = useState<Folder>('inbox');
   const [missFilter, setMissFilter] = useState<MissCheck | null>(null);
   const [viaFilter, setViaFilter] = useState<string | null>(null);
@@ -292,7 +295,7 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
       ) : (
         <div className="space-y-2.5">
           {shown.map((m) => (
-            <MatchCard key={m.id} m={m} verdict={feedback[m.id]} onVerdict={onVerdict} onWatch={onWatch} />
+            <MatchCard key={m.id} m={m} verdict={feedback[m.id]} onVerdict={onVerdict} onWatch={onWatch} jobBoard={jobBoard} />
           ))}
         </div>
       )}
@@ -333,7 +336,9 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
   );
 }
 
-function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: boolean }; verdict?: Verdict; onVerdict: Props['onVerdict']; onWatch: Props['onWatch'] }) {
+function MatchCard({ m, verdict, onVerdict, onWatch, jobBoard }: { m: Match & { closed?: boolean }; verdict?: Verdict; onVerdict: Props['onVerdict']; onWatch: Props['onWatch']; jobBoard?: boolean }) {
+  // Sent to JobBoard: once it's saved there, this role is done here, so offer to archive it.
+  const [sent, setSent] = useState(false);
   const [asking, setAsking] = useState(false);
   const [finding, setFinding] = useState(false);
   // Tailor resume: the posting's text (when its board can be read) and whether it reached the clipboard.
@@ -435,6 +440,18 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           ) : verdict ? (
             <>
               <Button size="sm" onClick={archive} title="Done with this role: move it to the Archive">Archive →</Button>
+              {interested && jobBoard && (
+                <a
+                  href={jobBoardLink(m)}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => setSent(true)}
+                  title="Open JobBoard's Add opportunity form with this role filled in"
+                  className="rounded-md px-2.5 py-1 text-center text-[13px] font-medium text-ink-soft hover:bg-paper"
+                >
+                  → JobBoard
+                </a>
+              )}
               {interested && !tailor && (
                 <Button size="sm" variant="ghost" onClick={startTailor} title="Tailor your resume to this role with ResumeMachine, in your own AI assistant">
                   Tailor resume
@@ -458,6 +475,16 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           )}
         </div>
       </div>
+
+      {sent && interested && (
+        <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3 text-sm sm:flex-row sm:items-center">
+          <span className="min-w-0 flex-1 text-ink-soft">Opened in JobBoard. Once you've saved it there, it's done here.</span>
+          <div className="flex gap-1.5">
+            <Button size="sm" variant="primary" onClick={archive}>Archive it here →</Button>
+            <Button size="sm" variant="ghost" onClick={() => setSent(false)}>Keep it</Button>
+          </div>
+        </div>
+      )}
 
       {tailor && (
         <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3 text-sm sm:flex-row sm:items-center">
