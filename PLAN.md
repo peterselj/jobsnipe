@@ -47,6 +47,9 @@ Action) hourly; it reads the boards, saves what changed, and emails through Brev
   a "Save to JobSnipe" bookmark that fills it in from the page you're on.
 - **Job-alert inbox** (needs one-time setup, `docs/SETUP.md` section 5). An address per person for
   LinkedIn, Indeed, Wellfound and VC-board alerts; jobs are read from the emails without AI.
+- **Send to JobBoard.** Opt-in per account (off by default, since not everyone uses JobBoard): a
+  "→ JobBoard" button on Interested roles opens JobBoard's Add opportunity form filled in, and
+  archives the role here.
 - **Tailor resume.** On Interested roles: copies the posting's text (Greenhouse, Lever, Ashby) and
   hands off to ResumeMachine, which tailors your resume in your own AI assistant.
 - **Looking after itself.** Unchanged boards cost almost nothing; a broken board emails you after
@@ -91,12 +94,10 @@ Next, in the order I'd do them:
 1. **Prove the job-alert inbox on real emails.** Do the one-time setup, point a LinkedIn alert at it,
    and tune the reader to whatever "no jobs found" turns up. This is how LinkedIn, Indeed and the
    Consider VC boards (Sequoia, a16z, Kleiner, Lightspeed, Bessemer, Felicis) get covered.
-2. **Send to JobBoard** on Interested roles: opt-in per person (off by default), built as a draft in
-   both repos so the handoff can be tried before it's committed to.
-3. **More company boards:** Workable (its job feed couldn't be confirmed on Nov 10: the test
+2. **More company boards:** Workable (its job feed couldn't be confirmed on Nov 10: the test
    accounts had no open jobs), BambooHR, and the standard job details many careers pages embed for
    Google. SmartRecruiters and Recruitee are done.
-4. **Posted-within-N-days for Discover**, separate from your list's age limit.
+3. **Posted-within-N-days for Discover**, separate from your list's age limit.
 
 Later:
 

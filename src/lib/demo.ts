@@ -14,6 +14,7 @@ const PROFILE: Profile = {
   alert_mode: 'immediate',
   alerts_paused: false,
   digest_every: 'daily',
+  send_to_jobboard: false,
   inbox_token: null,
   criteria: {
     titles: { include: ['product manager', 'head of product'], exclude: ['product marketing', 'intern'] },

@@ -52,9 +52,9 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
   suggestions: Suggestion[];
   onAcceptSuggestion: (s: Suggestion) => Promise<void>;
   onDismissSuggestion: (s: Suggestion) => Promise<void>;
-  /** Whether "Send to JobBoard" is on in this browser. */
+  /** Whether "Send to JobBoard" is on for this account. */
   jobBoard: boolean;
-  onJobBoard: (on: boolean) => void;
+  onJobBoard: (on: boolean) => Promise<void>;
   onDigest: (every: DigestEvery) => Promise<void>;
   /** Roles the current filters hid for one reason; used to show what each filter is costing. */
   nearMisses: Match[];
@@ -153,7 +153,7 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
           <p className="text-sm text-muted">
             Adds a “→ JobBoard” button to ★ Interested roles. It opens{' '}
             <a className="text-forest underline-offset-2 hover:underline" href={JOBBOARD} target="_blank" rel="noreferrer">JobBoard</a>, a
-            referral-first tracker for the roles you're pursuing, with the role filled in. Remembered in this browser only.
+            referral-first tracker for the roles you're pursuing, with the role filled in, and archives the role here.
           </p>
         </div>
         <Button variant="secondary" onClick={() => onJobBoard(!jobBoard)}>{jobBoard ? 'Turn off' : 'Turn on'}</Button>

@@ -337,8 +337,6 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
 }
 
 function MatchCard({ m, verdict, onVerdict, onWatch, jobBoard }: { m: Match & { closed?: boolean }; verdict?: Verdict; onVerdict: Props['onVerdict']; onWatch: Props['onWatch']; jobBoard?: boolean }) {
-  // Sent to JobBoard: once it's saved there, this role is done here, so offer to archive it.
-  const [sent, setSent] = useState(false);
   const [asking, setAsking] = useState(false);
   const [finding, setFinding] = useState(false);
   // Tailor resume: the posting's text (when its board can be read) and whether it reached the clipboard.
@@ -445,8 +443,9 @@ function MatchCard({ m, verdict, onVerdict, onWatch, jobBoard }: { m: Match & { 
                   href={jobBoardLink(m)}
                   target="_blank"
                   rel="noreferrer"
-                  onClick={() => setSent(true)}
-                  title="Open JobBoard's Add opportunity form with this role filled in"
+                  // Sent to JobBoard = done here. Archived a beat later, so the link opens first.
+                  onClick={() => setTimeout(archive, 0)}
+                  title="Open JobBoard's Add opportunity form with this role filled in, and archive it here"
                   className="rounded-md px-2.5 py-1 text-center text-[13px] font-medium text-ink-soft hover:bg-paper"
                 >
                   → JobBoard
@@ -475,16 +474,6 @@ function MatchCard({ m, verdict, onVerdict, onWatch, jobBoard }: { m: Match & { 
           )}
         </div>
       </div>
-
-      {sent && interested && (
-        <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3 text-sm sm:flex-row sm:items-center">
-          <span className="min-w-0 flex-1 text-ink-soft">Opened in JobBoard. Once you've saved it there, it's done here.</span>
-          <div className="flex gap-1.5">
-            <Button size="sm" variant="primary" onClick={archive}>Archive it here →</Button>
-            <Button size="sm" variant="ghost" onClick={() => setSent(false)}>Keep it</Button>
-          </div>
-        </div>
-      )}
 
       {tailor && (
         <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3 text-sm sm:flex-row sm:items-center">

@@ -336,4 +336,11 @@ describe('database', () => {
     await db.query(`select save_discover_postings($1::jsonb, now())`, [row({})]); // a later read without them keeps what's known
     expect((await db.query(`select stage, industries from discover_postings where id = 'd:stage'`)).rows).toEqual([{ stage: 'series_b', industries: ['Biotechnology', 'Health Care'] }]);
   });
+
+  it('0014: Send to JobBoard is off by default and each person sets only their own', async () => {
+    expect((await db.query(`select send_to_jobboard from profiles where id = '${JAKE}'`)).rows).toEqual([{ send_to_jobboard: false }]);
+    await as(JAKE, `update profiles set send_to_jobboard = true`);
+    expect((await db.query(`select id from profiles where send_to_jobboard`)).rows).toEqual([{ id: JAKE }]);
+    await as(JAKE, `update profiles set send_to_jobboard = false`);
+  });
 });

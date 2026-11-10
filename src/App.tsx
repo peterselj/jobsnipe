@@ -9,7 +9,7 @@ import { Button, Mark } from './components/ui';
 import { capturePendingAdd, manualId, takePendingAdd, type RoleDraft } from './lib/addRole';
 import { DemoSource } from './lib/demo';
 import { dismiss, suggest } from './lib/suggest';
-import { jobBoardEnabled, setJobBoardEnabled } from './lib/jobboard';
+import { takeBrowserSetting } from './lib/jobboard';
 import { ago } from '../shared/format';
 import { SupabaseSource, type DataSource } from './lib/source';
 import { supabase, supabaseConfigured } from './lib/supabase';
@@ -70,9 +70,13 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
   const [, tick] = useState(0);
   // The Add a role dialog: closed, open blank, or open with a role from the bookmark.
   const [adding, setAdding] = useState<RoleDraft | true | null>(() => takePendingAdd() ?? null);
-  const [jobBoard, setJobBoard] = useState(jobBoardEnabled);
 
   const reload = useCallback(async () => setSnap(await source.load()), [source]);
+  // "Send to JobBoard" used to be remembered per browser; if it was on here, move it to the account.
+  useEffect(() => {
+    if (source.kind === 'demo' || !takeBrowserSetting()) return;
+    void source.saveProfile({ send_to_jobboard: true }).then(reload).catch(() => undefined);
+  }, [source, reload]);
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
 
   useEffect(() => {
@@ -280,10 +284,10 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
               await source.saveProfile({ criteria: dismiss(snap.profile.criteria, s.id) });
               await reload();
             }}
-            jobBoard={jobBoard}
-            onJobBoard={(on) => {
-              setJobBoardEnabled(on);
-              setJobBoard(on);
+            jobBoard={snap.profile.send_to_jobboard}
+            onJobBoard={async (on) => {
+              await source.saveProfile({ send_to_jobboard: on });
+              await reload();
               flash(on ? '“→ JobBoard” now shows on your ★ Interested roles.' : 'Send to JobBoard is off.');
             }}
             onInbox={async (on) => {
@@ -332,7 +336,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             discoverSources={snap.discoverSources}
             digestEvery={snap.profile.digest_every}
             suggestions={suggestions.length}
-            jobBoard={jobBoard}
+            jobBoard={snap.profile.send_to_jobboard}
             onWatch={async (w) => {
               try {
                 await addWatch(w);

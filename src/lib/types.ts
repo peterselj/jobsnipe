@@ -12,6 +12,8 @@ export interface Profile {
   alerts_paused: boolean;
   /** How often the Discover digest email comes. */
   digest_every: DigestEvery;
+  /** Show "→ JobBoard" on Interested roles. Off unless this person turned it on. */
+  send_to_jobboard: boolean;
   /** The first part of this person's job-alert inbox address; null when the inbox is off. */
   inbox_token?: string | null;
 }

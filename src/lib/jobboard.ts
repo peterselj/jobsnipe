@@ -2,28 +2,23 @@ import { safeHttpUrl } from '../../shared/url';
 import type { Match } from './types';
 
 // "Send to JobBoard": hand an Interested role to JobBoard (peterselj.github.io/JobBoard), a
-// referral-first tracker for the roles you're pursuing. It's opt-in per browser, because JobBoard
-// keeps its data in the browser too and not everyone who uses JobSnipe uses it. The link opens
+// referral-first tracker for the roles you're pursuing. It's opt-in per person (off by default), because
+// not everyone who uses JobSnipe uses JobBoard. The link opens
 // JobBoard's Add opportunity form filled in; nothing is saved there until you press Save.
 
 export const JOBBOARD = 'https://peterselj.github.io/JobBoard/';
 
-const PREF = 'jobsnipe.sendToJobBoard';
-
-export function jobBoardEnabled(store: Pick<Storage, 'getItem'> = localStorage): boolean {
+/**
+ * The switch used to be remembered per browser. If it was on here, report that once (and forget
+ * it), so it can be carried over to the account.
+ */
+export function takeBrowserSetting(store: Pick<Storage, 'getItem' | 'removeItem'> = localStorage): boolean {
   try {
-    return store.getItem(PREF) === '1';
+    const on = store.getItem('jobsnipe.sendToJobBoard') === '1';
+    store.removeItem('jobsnipe.sendToJobBoard');
+    return on;
   } catch {
-    return false; // storage blocked: the button just stays off
-  }
-}
-
-export function setJobBoardEnabled(on: boolean, store: Pick<Storage, 'setItem' | 'removeItem'> = localStorage): void {
-  try {
-    if (on) store.setItem(PREF, '1');
-    else store.removeItem(PREF);
-  } catch {
-    // storage blocked: nothing to remember
+    return false;
   }
 }
 
