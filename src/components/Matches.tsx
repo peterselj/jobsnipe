@@ -29,6 +29,8 @@ interface Props {
   onWatch: (c: NewWatch) => Promise<void>;
   discoverSources: DiscoverSource[];
   digestEvery: DigestEvery;
+  /** How many filter suggestions are waiting in Settings. */
+  suggestions?: number;
 }
 
 const DAY = 86_400_000;
@@ -69,7 +71,7 @@ const ARCHIVE_RECENT_DAYS = 30;
  * good, so it never comes back. Decided and archived roles are read from the saved verdicts, so
  * they stay listed after the posting closes.
  */
-export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings, onWatch, discoverSources, digestEvery }: Props) {
+export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings, onWatch, discoverSources, digestEvery, suggestions }: Props) {
   const [folder, setFolder] = useState<Folder>('inbox');
   const [missFilter, setMissFilter] = useState<MissCheck | null>(null);
   const [viaFilter, setViaFilter] = useState<string | null>(null);
@@ -234,6 +236,15 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
             </span>
           )}
         </div>
+      )}
+
+      {suggestions! > 0 && (folder === 'not_for_me' || folder === 'near' || folder === 'archive') && onOpenSettings && (
+        <p className="mb-3 rounded-xl border border-forest-2/50 bg-emerald-50/40 px-4 py-2.5 text-sm text-ink-soft">
+          Your decisions point to {suggestions === 1 ? 'a change' : `${suggestions} changes`} worth making to your filters.{' '}
+          <button className="font-semibold text-forest underline-offset-2 hover:underline" onClick={onOpenSettings}>
+            See {suggestions === 1 ? 'the suggestion' : 'the suggestions'} →
+          </button>
+        </p>
       )}
 
       {folder === 'discover' && (

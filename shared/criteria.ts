@@ -14,6 +14,8 @@ export interface Criteria {
   max_age_days?: number;
   /** Extra filters for Discover only, from what VC boards say about each company. */
   discover?: DiscoverFilters;
+  /** Suggestions (src/lib/suggest.ts) this person said no to, so they aren't offered again. */
+  dismissed_suggestions?: string[];
 }
 
 export interface DiscoverFilters {

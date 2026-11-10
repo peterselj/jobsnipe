@@ -63,6 +63,10 @@ export class DemoSource implements DataSource {
   private feedback: Snapshot['feedback'] = {
     a1: { verdict: 'not_for_me', reason: 'too early-stage', at: iso(24 * 5), archivedAt: iso(24 * 3), company: 'Pinecrest Analytics', title: 'Senior Product Manager, Data Platform', url: 'https://example.com/jobs/a1' },
     a2: { verdict: 'interested', at: iso(24 * 50), archivedAt: iso(24 * 45), company: 'Harbor Freightworks', title: 'Lead Product Manager, Logistics', url: 'https://example.com/jobs/a2' },
+    // Three passes with the same word in the title: enough for Settings to suggest skipping it.
+    a4: { verdict: 'not_for_me', reason: 'too technical', at: iso(24 * 6), archivedAt: iso(24 * 6), company: 'Lumen Grid', title: 'Senior Technical Product Manager, APIs', url: 'https://example.com/jobs/a4' },
+    a5: { verdict: 'not_for_me', reason: 'want less technical', at: iso(24 * 9), archivedAt: iso(24 * 9), company: 'Fathom Robotics', title: 'Technical Product Manager, Perception', url: 'https://example.com/jobs/a5' },
+    a6: { verdict: 'not_for_me', at: iso(24 * 12), archivedAt: iso(24 * 12), company: 'Quarry Cloud', title: 'Principal Technical Product Manager', url: 'https://example.com/jobs/a6' },
     a3: { at: iso(24 * 70), archivedAt: iso(24 * 70), company: 'Oakline Bank', title: 'Senior Product Manager, Lending', url: 'https://example.com/jobs/a3' },
   };
   private run: Run = { startedAt: iso(0.4), finishedAt: iso(0.39), trigger: 'schedule', errors: 0 };

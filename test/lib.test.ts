@@ -157,3 +157,70 @@ describe('SmartRecruiters and Recruitee links, and Discover filters', () => {
     expect([stageLabel('series_b'), stageLabel('ipo'), stageLabel('seed')]).toEqual(['Series B', 'Public (IPO)', 'Seed']);
   });
 });
+
+describe('suggestions from your decisions', () => {
+  const at = '2026-11-10T00:00:00Z';
+  const v = (verdict: 'interested' | 'not_for_me', title: string, company = 'Acme', reason?: string) => ({ verdict, title, company, at, reason });
+  const criteria = {
+    titles: { include: ['product manager'], exclude: ['intern'] },
+    comp_floor: { USD: 140000 },
+    max_age_days: 30,
+  };
+  const role = (id: string, over: object = {}) => ({ id, company: 'Acme', title: 'Senior Product Manager', url: 'https://x', flags: [], firstSeenAt: at, ...over });
+
+  it('suggests skipping a title word you keep passing on, and never one you also starred', async () => {
+    const { suggest } = await import('../src/lib/suggest');
+    const feedback = {
+      a: v('not_for_me', 'Senior Technical Product Manager', 'Acme', 'too technical'),
+      b: v('not_for_me', 'Technical Product Manager, Infra', 'Beta'),
+      c: v('not_for_me', 'Staff Technical Product Manager', 'Gamma'),
+      d: v('not_for_me', 'Senior Product Manager, Growth', 'Acme'),
+      e: v('not_for_me', 'Product Manager, Growth', 'Beta'),
+      f: v('not_for_me', 'Lead Product Manager, Growth', 'Gamma'),
+      g: v('interested', 'Group Product Manager, Growth', 'Delta'), // starred a Growth role: no suggestion for it
+    };
+    const inbox = [role('m1', { title: 'Principal Technical Product Manager' }), role('m2')];
+    const s = suggest({ criteria, feedback, matches: inbox, watches: [] });
+    expect(s.map((x) => x.id)).toEqual(['title:technical']);
+    expect(s[0].text).toBe('Skip titles containing “technical”?');
+    expect(s[0].why).toMatch(/passed on 3 roles .* clear 1 role waiting/);
+    expect(s[0].evidence).toHaveLength(3);
+    expect(s[0].criteria!.titles).toEqual({ include: ['product manager'], exclude: ['intern', 'technical'] });
+    // Two decisions aren't a pattern, and a dismissed suggestion stays gone.
+    const { a: _a, ...fewer } = feedback;
+    expect(suggest({ criteria, feedback: fewer, matches: [], watches: [] })).toEqual([]);
+    const { dismiss } = await import('../src/lib/suggest');
+    expect(suggest({ criteria: dismiss(criteria, 'title:technical'), feedback, matches: inbox, watches: [] })).toEqual([]);
+  });
+
+  it('suggests a lower pay floor and a longer age limit when you star what they hid', async () => {
+    const { suggest } = await import('../src/lib/suggest');
+    const pay = (id: string, max: number) => role(id, { nearMiss: 'pay', comp: { min: max - 20000, max, currency: 'USD' } });
+    const matches = [pay('p1', 138000), pay('p2', 134000), pay('p3', 132500), role('o1', { nearMiss: 'age' }), role('o2', { nearMiss: 'age' }), role('o3', { nearMiss: 'age' })];
+    const feedback = Object.fromEntries(matches.map((m) => [m.id, v('interested', m.title)]));
+    const s = suggest({ criteria, feedback, matches, watches: [] });
+    expect(s.map((x) => [x.id, x.text])).toEqual([
+      ['pay:USD:130000', 'Lower your USD pay floor from $140K to $130K?'],
+      ['age:60', 'Raise your age limit from 30 to 60 days?'],
+    ]);
+    expect(s[0].criteria!.comp_floor).toEqual({ USD: 130000 });
+    expect(s[1].criteria!.max_age_days).toBe(60);
+  });
+
+  it('suggests dropping a company where you pass on everything, and an industry you keep passing on in Discover', async () => {
+    const { suggest } = await import('../src/lib/suggest');
+    const watches = [{ id: 7, name: 'Acme', ats: 'lever' as const, status: 'ok' as const }, { id: 8, name: 'Beta', ats: 'lever' as const, status: 'ok' as const }];
+    const feedback: Record<string, ReturnType<typeof v>> = {
+      a1: v('not_for_me', 'Senior Product Manager, Ads', 'Acme', 'ads'), a2: v('not_for_me', 'Senior Product Manager, Search', 'Acme'),
+      a3: v('not_for_me', 'Staff Product Manager, Maps', 'Acme'), a4: v('not_for_me', 'Lead Product Manager, Mail', 'Acme'),
+      b1: v('not_for_me', 'Senior Product Manager, Cards', 'Beta'), b2: v('interested', 'Staff Product Manager, Loans', 'Beta'),
+      d1: v('not_for_me', 'Senior Product Manager, Assays', 'Genewave'), d2: v('not_for_me', 'Staff Product Manager, Trials', 'Helix'), d3: v('not_for_me', 'Lead Product Manager, Lab', 'Cellco'),
+    };
+    const bio = (id: string) => role(id, { via: ['Board A'], industries: ['Biotechnology', 'Health Care'] });
+    const s = suggest({ criteria, feedback, matches: [bio('d1'), bio('d2'), bio('d3')], watches });
+    expect(s.map((x) => x.id)).toEqual(['watch:7', 'industry:biotechnology']);
+    expect(s[0]).toMatchObject({ text: 'Stop watching Acme?', removeWatch: { id: 7, name: 'Acme' } });
+    expect(s[0].evidence[0]).toBe('Senior Product Manager, Ads (“ads”)');
+    expect(s[1].criteria!.discover).toEqual({ skip_industries: ['biotechnology'] });
+  });
+});
