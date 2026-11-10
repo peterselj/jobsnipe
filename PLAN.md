@@ -12,7 +12,7 @@ breadth never costs speed:
 | | **Your list** (fast lane) | **Discover** |
 |---|---|---|
 | What | Companies you chose | Everything else that passes all your filters |
-| Read from | Each company's own board: Greenhouse, Lever, Ashby, Workday | VC portfolio boards (Getro); your job-alert emails |
+| Read from | Each company's own board: Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Recruitee | VC portfolio boards (Getro); your job-alert emails |
 | Checked | Hourly | Every 4 hours; emails hourly |
 | Alerts | One email per new match | A digest: daily, weekly, every 2 weeks or never |
 | On the page | Inbox | Discover tab, labelled with where each role came from |
@@ -36,7 +36,8 @@ Action) hourly; it reads the boards, saves what changed, and emails through Brev
   is a level word by itself ("director"), which matches every such role in any field.
 - **Discover.** Five VC boards on Getro (General Catalyst, Khosla, Accel, Thrive, Lux). Pay looked
   up on the company's own board when the VC board leaves it out; the same job filed under two
-  companies shown once; "+ Watch company" moves a company to your list.
+  companies shown once; "+ Watch company" moves a company to your list. Discover-only filters skip
+  the industries and company stages you name (the VC boards say both).
 - **Roles you find yourself.** "+ Add role" (paste any job link: LinkedIn, a referral, anywhere) and
   a "Save to JobSnipe" bookmark that fills it in from the page you're on.
 - **Job-alert inbox** (needs one-time setup, `docs/SETUP.md` section 5). An address per person for
@@ -44,7 +45,9 @@ Action) hourly; it reads the boards, saves what changed, and emails through Brev
 - **Tailor resume.** On Interested roles: copies the posting's text (Greenhouse, Lever, Ashby) and
   hands off to ResumeMachine, which tailors your resume in your own AI assistant.
 - **Looking after itself.** Unchanged boards cost almost nothing; a broken board emails you after
-  two failed hours; a Discover failure never holds up your list; pause alerts; delete account.
+  two failed hours; a Discover failure never holds up your list; pause alerts; delete account. A
+  heartbeat on GitHub's own clock fails (and GitHub emails the owner) if no check has finished in
+  three hours, or if only the 3-hourly backup is starting them.
 
 ## Security: what's guarded, and what to keep an eye on
 
@@ -73,8 +76,8 @@ Still worth knowing:
   links and addresses stripped. Keep it that way when adding log lines.
 - **Brevo's free plan caps daily sends.** A burst (a big first digest, many broken boards) could hit
   it; sends that fail are retried the next hour.
-- **If the hourly timer stops, nothing says so.** GitHub's own schedule is a 3-hourly backup, and the
-  page shows "Last check" in amber when it's stale. An alert for this is on the list below.
+- **If the hourly timer stops,** the Heartbeat workflow fails and GitHub emails you, as long as
+  GitHub → Settings → Notifications → Actions has email on for failed workflows (it is by default).
 
 ## Roadmap
 
@@ -89,11 +92,10 @@ Next, in the order I'd do them:
    the title: skip those?", "you starred 3 pay near misses: lower the floor to $130K?". One click to
    accept, visible and reversible in Settings. Worth building once there are 30+ decisions with
    reasons.
-4. **Discover-only filters** from what VC boards know and company boards don't: industry (skip
-   biotech), company stage, posted within N days.
-5. **More company boards:** SmartRecruiters, Workable, Recruitee and BambooHR all have public job
-   lists like Greenhouse's. Then the standard job details many careers pages embed for Google.
-6. **A heartbeat:** email the owner if no check has finished in three hours.
+4. **More company boards:** Workable (its job feed couldn't be confirmed on Nov 10: the test
+   accounts had no open jobs), BambooHR, and the standard job details many careers pages embed for
+   Google. SmartRecruiters and Recruitee are done.
+5. **Posted-within-N-days for Discover**, separate from your list's age limit.
 
 Later:
 

@@ -118,6 +118,10 @@ can also turn their own address off in Settings.
 ## Checking on it
 
 - **Runs:** this repo → Actions → "Check job boards". Each run's log lists every board and any errors.
+- **Heartbeat:** Actions → "Heartbeat" runs every 4 hours on GitHub's own clock and fails if no check
+  has finished in 3 hours, or if only the 3-hourly backup is starting checks (the Supabase timer or
+  its GitHub token has stopped). GitHub emails you about a failed run if github.com → Settings →
+  Notifications → Actions has email turned on.
 - **Timer:** in Supabase SQL Editor, `select * from cron.job_run_details order by start_time desc limit 5;`
   shows the last hourly starts; `select * from net._http_response order by created desc limit 5;` shows
   GitHub's replies (204 = started).
