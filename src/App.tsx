@@ -8,6 +8,7 @@ import SignIn from './components/SignIn';
 import { Button, Mark } from './components/ui';
 import { capturePendingAdd, manualId, takePendingAdd, type RoleDraft } from './lib/addRole';
 import { DemoSource } from './lib/demo';
+import { jobBoardEnabled, setJobBoardEnabled } from './lib/jobboard';
 import { ago } from '../shared/format';
 import { SupabaseSource, type DataSource } from './lib/source';
 import { supabase, supabaseConfigured } from './lib/supabase';
@@ -68,6 +69,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
   const [, tick] = useState(0);
   // The Add a role dialog: closed, open blank, or open with a role from the bookmark.
   const [adding, setAdding] = useState<RoleDraft | true | null>(() => takePendingAdd() ?? null);
+  const [jobBoard, setJobBoard] = useState(jobBoardEnabled);
 
   const reload = useCallback(async () => setSnap(await source.load()), [source]);
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
@@ -257,6 +259,12 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             discoverRoles={snap.matches.filter((m) => m.via && !m.onList)}
             discoverSources={snap.discoverSources}
             inboxEmails={snap.inboxEmails}
+            jobBoard={jobBoard}
+            onJobBoard={(on) => {
+              setJobBoardEnabled(on);
+              setJobBoard(on);
+              flash(on ? '“→ JobBoard” now shows on your ★ Interested roles.' : 'Send to JobBoard is off.');
+            }}
             onInbox={async (on) => {
               await source.setInbox(on);
               await reload();
@@ -302,6 +310,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             onOpenSettings={() => setView('settings')}
             discoverSources={snap.discoverSources}
             digestEvery={snap.profile.digest_every}
+            jobBoard={jobBoard}
             onWatch={async (w) => {
               try {
                 await addWatch(w);
