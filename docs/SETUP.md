@@ -91,7 +91,8 @@ Brevo, which hands each email to a small Supabase function; the checker reads th
    Deploy. Then open the function's **Details** and turn **Enforce JWT verification** off (Brevo
    can't send a Supabase key; the function only files mail for addresses that exist).
 4. **Brevo:** GitHub → Actions → **Set up job-alert inbox** → Run workflow (the subdomain is filled
-   in). If it fails saying the key isn't allowed, make a new Brevo API key with webhook access,
+   in). It reads a key the database made in step 1 and puts it in the webhook's address, so only
+   Brevo can file mail; you never see or copy that key. If it fails saying the key isn't allowed, make a new Brevo API key with webhook access,
    replace the `BREVO_API_KEY` secret, and run it again.
 5. **Try it:** JobSnipe → Settings → Job-alert inbox → **Get my alerts address**, then send any email
    to it. It should appear under "Recent emails" within a minute or two (marked "not read yet" until
@@ -99,6 +100,20 @@ Brevo, which hands each email to a small Supabase function; the checker reads th
 
 To switch it off for everyone: delete the webhook in Brevo (or the function in Supabase). Each person
 can also turn their own address off in Settings.
+
+## 6. Who can use it, and changing your email
+
+- **Invite-only (recommended once you've shared it with the people you mean to):** Supabase →
+  Authentication → Sign In / Providers → turn off **Allow new users to sign up**. Invite someone from
+  Authentication → Users → **Invite user**. With sign-up open, anyone who finds the page can make an
+  account; limits keep that cheap (150 companies, 20 checks an hour each), but it's your Brevo quota.
+- **Changing the alert address:** alerts go to the sign-in address. Changing it in Settings makes
+  Supabase email a confirmation link (to the new address, and by default the old one too); nothing
+  changes until it's clicked. That needs the "Change email address" template to be on (it is by
+  default) under Authentication → Emails.
+- **If a key may have leaked:** make a new Supabase secret key (Project Settings → API keys) and a
+  new Brevo API key, replace the `SUPABASE_SECRET_KEY` and `BREVO_API_KEY` secrets in this repo
+  (Settings → Secrets and variables → Actions), then delete the old keys.
 
 ## Checking on it
 

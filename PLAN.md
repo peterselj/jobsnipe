@@ -1,104 +1,117 @@
-# JobSnipe build plan
+# JobSnipe: where it stands and where it's going
 
 Living plan. Personal search details (target companies, filters) live in the database, never in this
-public repo. The original spec and Phase 1 history are in the archived private `JobSnipe-backend` repo.
+public repo. Rewritten Nov 10 after a full review; the history of how each piece came about is in the
+merged pull requests.
 
-## Where things stand
+## What JobSnipe is
 
-- **Phase 1, fast lane (done).** Greenhouse, Lever and Ashby readers; diff against what's been seen;
-  title, seniority, location, remote-scope and pay filters; one email per new match; a one-time
-  "now watching" summary per company; broken-board alerts. Ran on GitHub Actions with state in a
-  private repo.
-- **Phase 2a, web page (done, being re-plumbed).** Matches with Interested / Not for me, companies
-  panel with health, add-a-company search (company name or pasted job link), Check now, demo mode.
-  Used a GitHub key to read and write the private repo; that was a stopgap and is being replaced.
+It tells you about new roles that fit, fast, and keeps the pile manageable. Two lanes, kept apart so
+breadth never costs speed:
 
-## Now: Phase 4 foundation (moved ahead of scoring and the slow lane)
+| | **Your list** (fast lane) | **Discover** |
+|---|---|---|
+| What | Companies you chose | Everything else that passes all your filters |
+| Read from | Each company's own board: Greenhouse, Lever, Ashby, Workday | VC portfolio boards (Getro); your job-alert emails |
+| Checked | Hourly | Every 4 hours; emails hourly |
+| Alerts | One email per new match | A digest: daily, weekly, every 2 weeks or never |
+| On the page | Inbox | Discover tab, labelled with where each role came from |
 
-Goal: anyone (Jake first) uses JobSnipe with just an email address. No GitHub, no keys, no files.
+How it runs: the page (GitHub Pages) signs people in and reads their data from Supabase, where
+row-level security keeps each person to their own. A timer in Supabase starts the checker (a GitHub
+Action) hourly; it reads the boards, saves what changed, and emails through Brevo. Setup:
+`docs/SETUP.md`.
 
-| Piece | Choice |
-|---|---|
-| Database + sign-in | Supabase: email magic-link sign-in; Postgres with row-level security so each person sees only their own settings, matches and feedback |
-| Checker | Same TypeScript checker, moved into this repo (`checker/`), run by GitHub Actions (free for public repos) |
-| Timer | Supabase `pg_cron` starts the checker hourly (GitHub's own schedule skipped most runs); Check now uses the same path |
-| Email | Brevo, fresh account just for JobSnipe, sending from Josh's domain. Also sends the sign-in emails |
-| Web page | Same page, data source swapped from GitHub to Supabase |
+## Built
 
-Work items:
-1. Database schema: profiles (filters as one JSON field so cues are easy to add or drop), companies
-   and postings (shared, each board fetched once however many people watch it), watches (who follows
-   which company), matches (per person), verdicts (Interested / Not for me + reason), alerts, runs.
-2. Checker reads and writes Supabase; emails through Brevo.
-3. Page: sign-in screen; matches as an **inbox** (Inbox = not yet decided, ending in "No new roles,
-   you're all caught up"; Interested; Not for me, hidden by default); companies panel; **settings page**
-   for filters and alert email; adding a company runs a real check immediately.
-4. Move Josh's current profile and companies into the database; archive `JobSnipe-backend`.
+- **Matching.** Titles (include / exclude), senior-and-up, places and remote by country, pay floor
+  per currency, age limit, and per-company tweaks ("Toronto only at this company"). Roles are dated
+  by when they went public, not when they were drafted.
+- **Inbox flow.** Inbox → ★ Interested / Not for me (with a reason) → Archive. Archive all, a filter
+  bar (place, minimum pay, keywords, pay listed), an Archive that shows the last 30 days, delete and
+  empty. Handled roles never come back, and a role re-listed under a new id is flagged as a repost
+  and not emailed again.
+- **Near misses.** Roles in your job family that failed exactly one filter, with what each filter is
+  costing shown in Settings and a what-if for the pay floor. Settings also warns when a title entry
+  is a level word by itself ("director"), which matches every such role in any field.
+- **Discover.** Five VC boards on Getro (General Catalyst, Khosla, Accel, Thrive, Lux). Pay looked
+  up on the company's own board when the VC board leaves it out; the same job filed under two
+  companies shown once; "+ Watch company" moves a company to your list.
+- **Roles you find yourself.** "+ Add role" (paste any job link: LinkedIn, a referral, anywhere) and
+  a "Save to JobSnipe" bookmark that fills it in from the page you're on.
+- **Job-alert inbox** (needs one-time setup, `docs/SETUP.md` section 5). An address per person for
+  LinkedIn, Indeed, Wellfound and VC-board alerts; jobs are read from the emails without AI.
+- **Tailor resume.** On Interested roles: copies the posting's text (Greenhouse, Lever, Ashby) and
+  hands off to ResumeMachine, which tailors your resume in your own AI assistant.
+- **Looking after itself.** Unchanged boards cost almost nothing; a broken board emails you after
+  two failed hours; a Discover failure never holds up your list; pause alerts; delete account.
 
-## Near misses: where they can go
+## Security: what's guarded, and what to keep an eye on
 
-A near miss is a role in your job family (title fits) that failed exactly **one** other check: pay,
-place or level. Two or more misses is noise; title misses are the wrong job. They're never emailed.
+Reviewed Nov 10. Fixed then:
 
-Places they can surface, and what's built:
+- **The check workflow ran outside text as shell code.** "Check now" forwarded a reason from the
+  signed-in person, and the workflow pasted it into a command next to the Supabase and Brevo keys.
+  It now arrives as a variable, and the database only ever sends two fixed reasons.
+- **Alerts could be pointed at anyone.** The alert address now follows the sign-in address, which
+  only changes after a confirmation link is clicked.
+- **Links could carry code.** Job links come from boards, VC boards and emails; only http(s) ones
+  are kept or made clickable (checker, emails, page and database each check), and the page ships a
+  content security policy as a backstop.
+- **No limits.** Now: 150 companies and 12 title searches per person, 20 checks an hour, 20,000 saved
+  roles, and size caps on filters and text.
+- **The email inbox's door was open.** The function that receives job-alert emails only accepts
+  requests carrying a key the database made; nobody copies it anywhere.
 
-1. **A Near misses tab** next to Inbox / Interested / Not for me, with chips per reason (Pay · Place ·
-   Level) and "★ Interested anyway". *Built.*
-2. **Next to each filter in Settings**, as the cost of that filter: "Your floor is hiding 3 roles (…)",
-   "Places hiding the most roles: San Francisco (18)", "Senior-and-up is hiding 2". *Built.*
-3. **What-if previews while editing:** type a lower pay floor and see "At $130K, 2 of those would show
-   up". *Built for pay.* Places could do the same ("Adding San Francisco would add 18").
-4. **A line in a weekly email:** "Your pay floor hid 2 roles this week." Fits with alert batching.
-5. **Learning from verdicts:** if you keep marking pay near misses Interested, suggest lowering the
-   floor (pairs with the Phase 5 rubric-revision idea).
-6. **Per company:** a company's near misses can suggest a per-company filter ("Anthropic: 12 NYC near
-   misses, 0 Toronto").
+Still worth knowing:
 
-## Next
+- **Anyone can sign up.** The page is public and sign-up is open, so a stranger can use your
+  GitHub Actions minutes and Brevo quota within the limits above. To make it invite-only: Supabase →
+  Authentication → Sign In / Providers → turn off "Allow new users to sign up", then invite people
+  from Authentication → Users. No code change needed.
+- **The repo and its Actions logs are public.** Logs name boards by number only, and errors have
+  links and addresses stripped. Keep it that way when adding log lines.
+- **Brevo's free plan caps daily sends.** A burst (a big first digest, many broken boards) could hit
+  it; sends that fail are retried the next hour.
+- **If the hourly timer stops, nothing says so.** GitHub's own schedule is a 3-hourly backup, and the
+  page shows "Last check" in amber when it's stale. An alert for this is on the list below.
 
-- **Scoring (rest of Phase 2).** AI rubric: tier, fit reason, flags, open questions. Each cue is a
-  separate optional field so any that feel cheesy or redundant can be switched off.
-- **Alert batching.** Immediate / hourly / daily / weekly, once immediate gets noisy.
-- **Slow lane (Phase 3).** Re-screen LinkedIn job-alert emails with your own filters; one or two
-  aggregators; Teamtailor and other boards the checker can't read yet; de-duplication.
-- **Built (Oct 27):** pause alerts, delete account, per-company filters (e.g. "Toronto only at this
-  company", "skip titles with technical here"), near misses (above), and leaner hourly checks
-  (unchanged boards cost almost nothing; only changes are written).
-- **Built (Oct 27, later):** Archive (from any folder, keeps your decision, never resurfaces) and an
-  age limit ("skip roles posted more than N days ago"; older ones become Age near misses).
-  Then "Archive all" on each folder (one save for the whole list, keeps each role's decision).
-- **Built (Nov 2):** "posted" means when a job went public. Lever only gives the date a job was
-  created (Waabi's Creative Director: created Oct 29, published Nov 2, emailed within the hour but
-  labelled "4d ago"). A board date earlier than our last look is replaced by when we first saw the
-  job, for the label and the age limit. Checks stay hourly.
-- **Built (Nov 3): Discover, first source.** VC portfolio boards on Getro (General Catalyst, Khosla,
-  Accel, Thrive, Lux): read every 4 hours, searched by your job titles (about 2,250 product roles
-  across the five), matched against all your filters, minus companies on your list. Discover tab with
-  a chip per VC, "+ Watch company" (straight onto your list when the job links to a board we read,
-  otherwise the finder opens), and a digest email: daily, weekly, every 2 weeks or never. Sequoia,
-  a16z, Kleiner, Lightspeed, Bessemer and Felicis run on Consider: next.
-- **Built (Nov 8):** Workday boards (pasted link only: Workday can't be found from a name or read by
-  the page, so the checker reads it as soon as it's added). Reads the whole board 20 at a time, splits
-  boards past Workday's 2,000-per-search cap by job category (NVIDIA: all 2,811), and reads a job's own
-  page for its places and pay when its title fits someone. Also: a company's own careers-site link is
-  turned into a name to try (careers.doordash.com → DoorDash, whose board is Greenhouse "doordashusa"),
-  a `?gh_jid=` in it picks the board that has that job, and "usa"/"us" are tried as name endings.
-- **More boards, next:** SmartRecruiters, Workable, Recruitee and BambooHR all have public job lists
-  like Greenhouse's. Truly custom career sites (Google, Apple, Amazon, Meta) each need their own reader.
-  The checker could also look inside a "not monitored" company's careers page for a board it links to.
-- **Built (Nov 8): a tidier Archive.** Shows the last 30 days ("Show older" for the rest); Delete on
-  each archived role and Empty archive. Deleting keeps a hidden note so the job never comes back to
-  the inbox; notes go 90 days after deletion once the job is no longer posted.
-- **Built (Nov 8): Discover clean-up.** Pay looked up on the company's own board when a VC board
-  leaves it out (Imprint: $190K–$210K); the same job filed under two companies shown once (Salesforce's
-  Slack jobs also listed as "Airkit"), with "links to salesforce" when the company and link disagree;
-  a filter bar on every list tab (place, minimum pay, keywords with -word to hide, pay listed), and
-  Archive all archives just what's in view.
-- **Built (Nov 9, on a branch to try out): job-alert inbox.** Each person can get an address to point
-  LinkedIn, Indeed, Wellfound and VC-board alerts at (the way to cover Consider boards: their search
-  refuses outside requests). Jobs are read from the emails without AI (title link, then company and
-  place); companies on your list that JobSnipe can't check directly go to the Inbox with an email,
-  the rest to Discover. Newsletters need AI: later.
-- **Phase 5.** Confirm each new email address with a link before alerting it; weekly rubric-revision
-  proposals from feedback; "Send to JobBoard".
-- **Text alerts** for people who prefer them (ntfy or Twilio).
+## Roadmap
+
+Next, in the order I'd do them:
+
+1. **Prove the job-alert inbox on real emails.** Do the one-time setup, point a LinkedIn alert at it,
+   and tune the reader to whatever "no jobs found" turns up. This is how LinkedIn, Indeed and the
+   Consider VC boards (Sequoia, a16z, Kleiner, Lightspeed, Bessemer, Felicis) get covered.
+2. **Send to JobBoard** on Interested roles: opt-in per person (off by default), built as a draft in
+   both repos so the handoff can be tried before it's committed to.
+3. **Suggestions from Not for me**, never silent changes: "5 roles you passed on had 'technical' in
+   the title: skip those?", "you starred 3 pay near misses: lower the floor to $130K?". One click to
+   accept, visible and reversible in Settings. Worth building once there are 30+ decisions with
+   reasons.
+4. **Discover-only filters** from what VC boards know and company boards don't: industry (skip
+   biotech), company stage, posted within N days.
+5. **More company boards:** SmartRecruiters, Workable, Recruitee and BambooHR all have public job
+   lists like Greenhouse's. Then the standard job details many careers pages embed for Google.
+6. **A heartbeat:** email the owner if no check has finished in three hours.
+
+Later:
+
+- **AI reading** (needs an Anthropic API key; a small model, a few dollars a month): newsletters in
+  the job-alert inbox (Ali Rohde, next play, a16z Jobs), HN "Who's Hiring", and a fit score with a
+  one-line reason per role.
+- **Portfolio lists.** For VCs whose boards can't be read, take their public list of companies and
+  find each company's own board, which is faster than any VC board anyway.
+- **A weekly review email:** what came in, what you did with it, what your filters hid.
+- **Batching for your list** (hourly / daily) if single emails get noisy; text alerts.
+
+Decided against, and why:
+
+- **Reading LinkedIn, Indeed, Wellfound or Work at a Startup directly.** Their terms forbid it, they
+  block it, and for sites you log in to it puts your account at risk. Their job-alert emails and the
+  "Save to JobSnipe" bookmark cover the same ground with your own hands on the wheel.
+- **Reading Consider boards' search directly.** It refuses requests that don't come from its own
+  page. Their alert emails go to the inbox instead.
+- **Filters that change themselves.** If JobSnipe quietly learned "skip fintech" from three clicks,
+  it could hide the one role you wanted and you'd never know. Suggestions you approve only.
+- **Showing both "created" and "posted" dates.** Only when a role went public is something to act on.
