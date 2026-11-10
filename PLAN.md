@@ -38,6 +38,11 @@ Action) hourly; it reads the boards, saves what changed, and emails through Brev
   up on the company's own board when the VC board leaves it out; the same job filed under two
   companies shown once; "+ Watch company" moves a company to your list. Discover-only filters skip
   the industries and company stages you name (the VC boards say both).
+- **Suggestions.** Patterns in your ★ Interested and Not for me decisions become offers at the top
+  of Settings: skip a word that's in three titles you passed on, lower the pay floor after three
+  starred pay near misses, widen the age limit, stop watching a company you always pass on, skip a
+  Discover industry. Each shows the roles it's drawn from; nothing changes until you accept, and a
+  dismissed one stays dismissed.
 - **Roles you find yourself.** "+ Add role" (paste any job link: LinkedIn, a referral, anywhere) and
   a "Save to JobSnipe" bookmark that fills it in from the page you're on.
 - **Job-alert inbox** (needs one-time setup, `docs/SETUP.md` section 5). An address per person for
@@ -88,14 +93,10 @@ Next, in the order I'd do them:
    Consider VC boards (Sequoia, a16z, Kleiner, Lightspeed, Bessemer, Felicis) get covered.
 2. **Send to JobBoard** on Interested roles: opt-in per person (off by default), built as a draft in
    both repos so the handoff can be tried before it's committed to.
-3. **Suggestions from Not for me**, never silent changes: "5 roles you passed on had 'technical' in
-   the title: skip those?", "you starred 3 pay near misses: lower the floor to $130K?". One click to
-   accept, visible and reversible in Settings. Worth building once there are 30+ decisions with
-   reasons.
-4. **More company boards:** Workable (its job feed couldn't be confirmed on Nov 10: the test
+3. **More company boards:** Workable (its job feed couldn't be confirmed on Nov 10: the test
    accounts had no open jobs), BambooHR, and the standard job details many careers pages embed for
    Google. SmartRecruiters and Recruitee are done.
-5. **Posted-within-N-days for Discover**, separate from your list's age limit.
+4. **Posted-within-N-days for Discover**, separate from your list's age limit.
 
 Later:
 

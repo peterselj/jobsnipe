@@ -8,6 +8,7 @@ import SignIn from './components/SignIn';
 import { Button, Mark } from './components/ui';
 import { capturePendingAdd, manualId, takePendingAdd, type RoleDraft } from './lib/addRole';
 import { DemoSource } from './lib/demo';
+import { dismiss, suggest } from './lib/suggest';
 import { jobBoardEnabled, setJobBoardEnabled } from './lib/jobboard';
 import { ago } from '../shared/format';
 import { SupabaseSource, type DataSource } from './lib/source';
@@ -163,6 +164,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
   const lastAt = snap.lastRun?.startedAt;
   const stale = lastAt ? Date.now() - Date.parse(lastAt) > 90 * 60_000 : true;
   const needsFilters = !snap.profile.criteria.titles?.include?.length;
+  const suggestions = suggest({ criteria: snap.profile.criteria, feedback: snap.feedback, matches: snap.matches, watches: snap.watches });
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -259,6 +261,25 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             discoverRoles={snap.matches.filter((m) => m.via && !m.onList)}
             discoverSources={snap.discoverSources}
             inboxEmails={snap.inboxEmails}
+            suggestions={suggestions}
+            onAcceptSuggestion={async (s) => {
+              if (s.removeWatch) {
+                await source.removeWatch(s.removeWatch.id);
+                // Decided, so it isn't offered again if the company is ever re-added.
+                await source.saveProfile({ criteria: dismiss(snap.profile.criteria, s.id) });
+                await reload();
+                return flash(`Stopped watching ${s.removeWatch.name}.`);
+              }
+              if (!s.criteria) return;
+              await source.saveProfile({ criteria: dismiss(s.criteria, s.id) });
+              await reload();
+              setView('matches');
+              void runCheck('Done, and re-checked with the change. You can undo it in Settings.');
+            }}
+            onDismissSuggestion={async (s) => {
+              await source.saveProfile({ criteria: dismiss(snap.profile.criteria, s.id) });
+              await reload();
+            }}
             jobBoard={jobBoard}
             onJobBoard={(on) => {
               setJobBoardEnabled(on);
@@ -310,6 +331,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             onOpenSettings={() => setView('settings')}
             discoverSources={snap.discoverSources}
             digestEvery={snap.profile.digest_every}
+            suggestions={suggestions.length}
             jobBoard={jobBoard}
             onWatch={async (w) => {
               try {

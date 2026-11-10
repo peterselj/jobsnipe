@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { stageLabel, tooBroadTitles } from '../../shared/criteria';
 import { money } from '../../shared/format';
 import { INBOX_DOMAIN } from '../lib/inbox';
+import type { Suggestion } from '../lib/suggest';
 import { JOBBOARD } from '../lib/jobboard';
 import type { Criteria, DigestEvery, DiscoverSource, InboxEmail, Match, Profile } from '../lib/types';
 import { Button, Field, Input, SectionHeader } from './ui';
@@ -40,13 +41,17 @@ function missedPlaces(nearMisses: Match[]): [string, number][] {
 }
 
 /** Name, alert email, filters, pausing, and deleting the account. Saving re-checks right away. */
-export default function Settings({ profile, nearMisses, discoverRoles, discoverSources, inboxEmails, jobBoard, onSave, onPause, onDigest, onInbox, onJobBoard, onDelete, onCancel }: {
+export default function Settings({ profile, nearMisses, discoverRoles, discoverSources, inboxEmails, suggestions, jobBoard, onSave, onPause, onDigest, onInbox, onJobBoard, onAcceptSuggestion, onDismissSuggestion, onDelete, onCancel }: {
   profile: Profile;
   /** Roles in Discover right now, for suggesting industries and stages to skip. */
   discoverRoles: Match[];
   discoverSources: DiscoverSource[];
   inboxEmails: InboxEmail[];
   onInbox: (on: boolean) => Promise<void>;
+  /** Changes worth considering, drawn from this person's decisions; nothing applies until accepted. */
+  suggestions: Suggestion[];
+  onAcceptSuggestion: (s: Suggestion) => Promise<void>;
+  onDismissSuggestion: (s: Suggestion) => Promise<void>;
   /** Whether "Send to JobBoard" is on in this browser. */
   jobBoard: boolean;
   onJobBoard: (on: boolean) => void;
@@ -138,6 +143,7 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
 
   return (
     <div className="mx-auto max-w-2xl space-y-5">
+      {suggestions.length > 0 && <SuggestionsCard suggestions={suggestions} onAccept={onAcceptSuggestion} onDismiss={onDismissSuggestion} />}
       <PauseCard paused={profile.alerts_paused} onPause={onPause} />
       <DigestCard every={profile.digest_every} sources={discoverSources} onChange={onDigest} />
       <InboxCard token={profile.inbox_token ?? null} emails={inboxEmails} onSet={onInbox} />
@@ -325,6 +331,55 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
       </div>
 
       <DeleteCard onDelete={onDelete} />
+    </div>
+  );
+}
+
+function SuggestionsCard({ suggestions, onAccept, onDismiss }: { suggestions: Suggestion[]; onAccept: (s: Suggestion) => Promise<void>; onDismiss: (s: Suggestion) => Promise<void> }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const run = async (s: Suggestion, fn: (s: Suggestion) => Promise<void>) => {
+    setBusy(s.id);
+    try {
+      await fn(s);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="rounded-xl border border-forest-2/50 bg-emerald-50/40 p-5">
+      <SectionHeader title={`Suggestions · ${suggestions.length}`} />
+      <p className="mb-3 text-sm text-muted">
+        Patterns in what you've marked ★ Interested and Not for me. Nothing changes unless you accept it, and anything you accept can be
+        undone in the filters below.
+      </p>
+      <ul className="space-y-2.5">
+        {suggestions.map((s) => (
+          <li key={s.id} className="rounded-lg border border-line bg-white px-4 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-ink">{s.text}</div>
+                <div className="mt-0.5 text-[13px] text-ink-soft">
+                  {s.why}{' '}
+                  <button className="font-medium text-forest underline-offset-2 hover:underline" onClick={() => setOpen(open === s.id ? null : s.id)}>
+                    {open === s.id ? 'Hide' : `See the ${s.evidence.length}`}
+                  </button>
+                </div>
+                {open === s.id && (
+                  <ul className="mt-1.5 list-disc space-y-0.5 pl-5 text-[13px] text-muted">
+                    {s.evidence.slice(0, 12).map((e, i) => <li key={i}>{e}</li>)}
+                    {s.evidence.length > 12 && <li>and {s.evidence.length - 12} more</li>}
+                  </ul>
+                )}
+              </div>
+              <div className="flex shrink-0 gap-1.5">
+                <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => run(s, onAccept)}>{busy === s.id ? 'Working…' : 'Accept'}</Button>
+                <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => run(s, onDismiss)}>Dismiss</Button>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
