@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { defaultTeams } from '../../shared/criteria';
 import { money } from '../../shared/format';
 import type { Criteria, DigestEvery, DiscoverSource, Match, Profile } from '../lib/types';
 import { Button, Field, Input, SectionHeader } from './ui';
@@ -48,6 +49,9 @@ export default function Settings({ profile, nearMisses, discoverSources, onSave,
   const [email, setEmail] = useState(profile.email);
   const [include, setInclude] = useState(toText(c.titles?.include));
   const [exclude, setExclude] = useState(toText(c.titles?.exclude));
+  // Until someone sets their teams, the checker works them out from their titles; show the same.
+  const [teams, setTeams] = useState(toText(c.teams?.include ?? defaultTeams(c.titles?.include)));
+  const [teamEmail, setTeamEmail] = useState(!!c.teams?.email);
   const [seniorOnly, setSeniorOnly] = useState(!!c.seniority?.require?.length);
   const [levels, setLevels] = useState(toText(c.seniority?.require ?? SENIOR_LEVELS));
   const [unlevelledPay, setUnlevelledPay] = useState(c.seniority?.unlevelled_pay_min?.toString() ?? '');
@@ -71,6 +75,7 @@ export default function Settings({ profile, nearMisses, discoverSources, onSave,
     const criteria: Criteria = {
       ...c, // keep any fields this page doesn't edit yet
       titles: { include: toList(include), exclude: toList(exclude) },
+      teams: { include: toList(teams), email: teamEmail },
       seniority: seniorOnly ? { require: toList(levels), unlevelled_pay_min: num(unlevelledPay) } : undefined,
       locations: areas.filter((a) => toList(a.match).length).map((a) => ({ name: a.name.trim() || toList(a.match)[0], match: toList(a.match) })),
       remote: { allowed: remote, countries: remote ? countries : [] },
@@ -130,6 +135,25 @@ export default function Settings({ profile, nearMisses, discoverSources, onSave,
           <Field label="But not containing" hint="Example: product marketing, intern, associate">
             <Input value={exclude} onChange={(e) => setExclude(e.target.value)} />
           </Field>
+          <Field
+            label="Also on teams named"
+            hint="Catches jobs filed under a team like Commercial Products with a title that isn't in your list (say, Senior Manager, Operating Model). They must pass every other filter, and engineering, design and similar titles are left out. Leave empty to turn off."
+          >
+            <Input value={teams} onChange={(e) => setTeams(e.target.value)} placeholder="product" />
+          </Field>
+          {toList(teams).length > 0 && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" className={check} checked={teamEmail} onChange={(e) => setTeamEmail(e.target.checked)} />
+              Email me about these too (otherwise they show under Near misses → Team)
+            </label>
+          )}
+          {missing('title').length > 0 && (
+            <p className={hint}>
+              {missing('title').length} open role{missing('title').length > 1 ? 's are' : ' is'} on a team you watch under another title (
+              {missing('title').slice(0, 2).map((m) => `${m.company}: ${m.title}`).join('; ')}
+              {missing('title').length > 2 ? '; …' : ''}). See {missing('title').length > 1 ? 'them' : 'it'} under Near misses → Team.
+            </p>
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" className={check} checked={seniorOnly} onChange={(e) => setSeniorOnly(e.target.checked)} />
             Senior and up only

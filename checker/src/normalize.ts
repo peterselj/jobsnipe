@@ -64,3 +64,9 @@ export function parseCompText(text: string): { min: number; max: number; currenc
   }
   return best;
 }
+
+/** A board's department and team as one label: distinct, non-empty parts joined with " / ". */
+export function teamLabel(...parts: (string | null | undefined)[]): string | undefined {
+  const seen = [...new Set(parts.map((p) => p?.trim()).filter((p): p is string => !!p))];
+  return seen.length ? seen.join(" / ") : undefined;
+}

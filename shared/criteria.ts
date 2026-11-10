@@ -12,6 +12,30 @@ export interface Criteria {
   comp_floor?: Record<string, number>;
   /** Skip roles posted longer ago than this many days. Unset = any age. */
   max_age_days?: number;
+  /**
+   * Teams to watch: a role on a team whose name has one of these words is shown even when its title
+   * isn't in `titles` (a "Senior Manager" on a Commercial Products team). As a near miss, or as a
+   * full match with `email`. Unset = worked out from the titles (defaultTeams); [] = off.
+   */
+  teams?: { include?: string[]; email?: boolean };
+}
+
+// Words in a job title that say how senior or what kind of role it is, not what field it's in.
+const ROLE_WORDS = new Set([
+  "manager", "management", "lead", "head", "director", "senior", "sr", "staff", "principal", "group", "vp",
+  "chief", "officer", "associate", "junior", "of", "the", "and", "for",
+]);
+
+/**
+ * The teams someone most likely means, from their job titles: the field words most of the titles
+ * share ("product manager, head of product, director of product" → product).
+ */
+export function defaultTeams(titles: string[] | undefined): string[] {
+  const terms = (titles ?? []).map((t) => t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !ROLE_WORDS.has(w)));
+  const withWords = terms.filter((t) => t.length);
+  const counts = new Map<string, number>();
+  for (const t of withWords) for (const w of new Set(t)) counts.set(w, (counts.get(w) ?? 0) + 1);
+  return [...counts].filter(([, n]) => n * 2 >= withWords.length).map(([w]) => w);
 }
 
 /**

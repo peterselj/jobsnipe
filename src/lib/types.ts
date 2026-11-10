@@ -27,7 +27,7 @@ export interface Match {
   atsPostedAt?: string;
   firstSeenAt: string;
   /** Set for a near miss: the one check it failed, and why. */
-  nearMiss?: 'seniority' | 'location' | 'pay' | 'age';
+  nearMiss?: 'title' | 'seniority' | 'location' | 'pay' | 'age';
   missDetail?: string;
   /** Set for Discover: passes your filters at a company you don't watch; which VC boards list it. */
   via?: string[];

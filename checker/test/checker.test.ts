@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeMailer, type Email, type Mailer } from "../src/email.js";
-import { evaluate, toFilters } from "../src/filters.js";
+import { evaluate, nearMiss, toFilters } from "../src/filters.js";
+import { defaultTeams } from "../../shared/criteria.js";
 import { htmlToText, parseCompText } from "../src/normalize.js";
 import { runCheck as realRunCheck, type RunOptions } from "../src/run.js";
 import { HttpError } from "../src/ats/http.js";
@@ -60,6 +61,41 @@ describe("filters", () => {
     expect(evaluate(post({}), toFilters({})).reasons.join()).toMatch(/no job titles/);
     expect(evaluate(post({}), toFilters(null)).pass).toBe(false);
     expect(evaluate(post({}), toFilters({ titles: { include: ["product manager"] }, locations: [{ name: "NYC", match: ["new york"] }] })).pass).toBe(true);
+  });
+
+  it("watches teams: a title off the list on a watched team is a near miss, never a different line of work", () => {
+    // Worked out from the titles when not set.
+    expect(defaultTeams(CRITERIA.titles!.include)).toEqual(["product"]);
+    expect(defaultTeams(["account manager", "director"])).toEqual(["account"]);
+    expect(f.teams).toEqual({ include: ["product"], email: false });
+
+    // Waabi, Oct 28: filed under Commercial Products, no "product" in the title.
+    const waabi = post({ title: "Senior Manager, Driverless Operating Model", team: "Commercial / Commercial Products", locations: ["San Francisco, CA", "Remote US & Canada"] });
+    const r = evaluate(waabi, f);
+    expect(r.pass).toBe(false);
+    expect(nearMiss(r)).toEqual({ check: "title", detail: "Title isn't in your list, but it's on the Commercial Products team" });
+
+    const near = (over: Partial<Posting>) => nearMiss(evaluate(post({ team: "Product", ...over }), f))?.check;
+    // Other lines of work on the same team, and titles with a skip word, stay out.
+    for (const title of ["Staff Software Engineer, Product", "Staff Product Designer", "Senior Data Analyst", "Senior Product Marketing Manager", "Product Manager Intern"]) {
+      expect(near({ title }), title).toBeUndefined();
+    }
+    // Everything else must still fit: level, place.
+    expect(near({ title: "Operations Manager" })).toBeUndefined();
+    expect(near({ title: "Senior Manager, Operations", locations: ["Boston, MA"] })).toBeUndefined();
+    // Not on a watched team, or no team known: the wrong job, as before.
+    expect(near({ title: "Senior Manager, Operations", team: "Finance" })).toBeUndefined();
+    expect(near({ title: "Senior Manager, Operations", team: undefined })).toBeUndefined();
+    // A title that fits is judged as always; its team changes nothing.
+    expect(evaluate(post({ team: "Finance" }), f).pass).toBe(true);
+    expect(near({ comp: { min: 100000, max: 120000, currency: "USD" } })).toBe("pay");
+
+    // "Email me about these too": a full match that says why it's here.
+    const emailed = evaluate(waabi, toFilters({ ...CRITERIA, teams: { include: ["product"], email: true } }));
+    expect(emailed.pass).toBe(true);
+    expect(emailed.flags[0]).toBe("title isn't in your list; on the Commercial Products team");
+    // Switched off.
+    expect(nearMiss(evaluate(waabi, toFilters({ ...CRITERIA, teams: { include: [] } })))).toBeUndefined();
   });
 
   it("parses pay text", () => {
@@ -247,6 +283,66 @@ describe("efficiency", () => {
     await runCheck({ store, mailer, fetch, fetchDetails, now: at(3) });
     expect(asked).toEqual(["greenhouse:acme:1", "greenhouse:acme:5"]);
     expect(sent.filter((e) => e.subject.startsWith("New match"))).toHaveLength(0);
+  });
+});
+
+describe("teams", () => {
+  const OPS = "Senior Manager, Driverless Operating Model";
+  const onTeam = (id: string, title: string, team?: string): Posting => ({ ...job(id, title), compChecked: true, team });
+
+  it("reads a board in full once to learn the teams of jobs already stored, then goes back to skipping it", async () => {
+    const { store, sent, mailer } = setup();
+    // As left by the checker before it read teams: jobs stored without one, tag saved, no reader version.
+    const tags: (string | undefined)[] = [];
+    let board: Posting[] | "unchanged" = [onTeam("1", "Senior Product Manager"), onTeam("2", OPS)];
+    const fetch = async (_a: unknown, _b: string, _c: string, etag?: string) => {
+      tags.push(etag);
+      return board === "unchanged" ? { unchanged: true as const } : { postings: board, etag: "v1" };
+    };
+    await runCheck({ store, mailer, fetch, now: at(1) });
+    store.companies_.get(1)!.reader_version = 0;
+    expect(store.matches.get(JOSH)?.map((m) => m.posting_id)).toEqual(["greenhouse:acme:1"]);
+
+    // The board hasn't changed, but it's read anyway (no tag sent) and the teams are saved.
+    board = [onTeam("1", "Senior Product Manager", "Product"), onTeam("2", OPS, "Commercial / Commercial Products")];
+    const writes = store.postingWrites;
+    await runCheck({ store, mailer, fetch, now: at(2) });
+    expect(tags).toEqual([undefined, undefined]);
+    expect(store.postingWrites).toBe(writes + 2);
+    expect(store.postings.get("greenhouse:acme:2")!.team).toBe("Commercial / Commercial Products");
+    expect(store.companies_.get(1)!.reader_version).toBe(1);
+    expect(store.matches.get(JOSH)?.map((m) => [m.posting_id, m.near_miss ?? "match", m.miss_detail ?? ""])).toEqual([
+      ["greenhouse:acme:1", "match", ""],
+      ["greenhouse:acme:2", "title", "Title isn't in your list, but it's on the Commercial Products team"],
+    ]);
+
+    // Next hour: the tag is sent again, nothing is written, and the near miss is still there from what's stored.
+    board = "unchanged";
+    await runCheck({ store, mailer, fetch, now: at(3) });
+    expect(tags[2]).toBe("v1");
+    expect(store.postingWrites).toBe(writes + 2);
+    expect(store.matches.get(JOSH)).toHaveLength(2);
+    expect(sent.filter((e) => e.subject.startsWith("New match"))).toHaveLength(0); // near misses are never emailed
+  });
+
+  it("looks up pay for a job on a watched team, and emails it when asked to", async () => {
+    const { store, sent, mailer } = setup();
+    store.people_[0] = { ...store.people_[0], criteria: { ...CRITERIA, teams: { include: ["product"], email: true } } };
+    let board = [job("1")];
+    const fetch = async () => ({ postings: board });
+    const looked: string[] = [];
+    const fetchDetails = async (_a: unknown, _b: string, p: Posting) => {
+      looked.push(p.title);
+      return { comp: { min: 190000, max: 240000, currency: "USD" } };
+    };
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(1) });
+    board = [job("1"), { ...job("2", OPS), team: "Commercial Products" }, { ...job("3", "Staff Software Engineer"), team: "Product" }];
+    await runCheck({ store, mailer, fetch, fetchDetails, now: at(2) });
+    expect(looked).toEqual(["Senior Product Manager", OPS]); // not the engineer
+    const alert = sent.filter((e) => e.subject.startsWith("New match"));
+    expect(alert).toHaveLength(1);
+    expect(alert[0].subject).toContain(OPS);
+    expect(alert[0].text).toContain("title isn't in your list; on the Commercial Products team");
   });
 });
 

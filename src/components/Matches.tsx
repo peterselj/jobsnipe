@@ -10,7 +10,7 @@ type Folder = 'inbox' | 'interested' | 'not_for_me' | 'near' | 'discover' | 'arc
 const DIGEST_LABEL: Record<DigestEvery, string> = { daily: 'a daily', weekly: 'a weekly', biweekly: 'a fortnightly', never: 'no' };
 type MissCheck = NonNullable<Match['nearMiss']>;
 
-export const MISS_LABEL: Record<MissCheck, string> = { pay: 'Pay', location: 'Place', seniority: 'Level', age: 'Age' };
+export const MISS_LABEL: Record<MissCheck, string> = { title: 'Team', pay: 'Pay', location: 'Place', seniority: 'Level', age: 'Age' };
 
 interface Props {
   matches: Match[];
@@ -163,12 +163,13 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
       {folder === 'near' && near.length > 0 && (
         <div className="mb-3 rounded-xl border border-line bg-white px-4 py-3">
           <p className="text-sm text-ink-soft">
-            Roles in your job family that your filters hid for <b>one</b> reason. Never emailed. If a pattern shows up, adjust
+            Roles your filters hid for <b>one</b> reason: the title fits but one filter doesn't, or everything fits and it's
+            on a team you watch under a title that isn't in your list. Never emailed. If a pattern shows up, adjust
             that filter in{' '}
             {onOpenSettings ? <button className="font-semibold text-forest underline-offset-2 hover:underline" onClick={onOpenSettings}>Settings</button> : 'Settings'}.
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {([null, 'pay', 'location', 'seniority', 'age'] as (MissCheck | null)[]).map((k) =>
+            {([null, 'title', 'pay', 'location', 'seniority', 'age'] as (MissCheck | null)[]).map((k) =>
               k && !missCounts[k] ? null : (
                 <button
                   key={k ?? 'all'}
@@ -300,7 +301,7 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
     inbox: ['No new roles!', "You're all caught up. JobSnipe checks every hour and emails you when something new fits."],
     interested: ['Nothing starred yet', 'Mark a role ★ Interested and it lands here, even after the posting closes.'],
     not_for_me: ['Nothing dismissed', 'Roles you mark Not for me are kept here, out of your way.'],
-    near: ['No near misses', 'Roles your filters hid for just one reason (pay, place, level or age) show up here.'],
+    near: ['No near misses', 'Roles your filters hid for just one reason (pay, place, level, age, or a title outside your list on a team you watch) show up here.'],
     discover: ['Nothing to discover yet', 'Roles that pass all your filters at companies you don\'t watch show up here, from VC portfolio job boards checked every 4 hours.'],
     archive: ['Archive is empty', "Done with a role (applied, moved it to JobBoard, or it's just stale)? Archive it. It never comes back to your inbox, and you can delete it from here when you want it gone."],
   }[folder];

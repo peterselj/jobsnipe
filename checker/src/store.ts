@@ -14,6 +14,8 @@ export interface CompanyRow {
   failure_alert_sent: boolean;
   open_postings: number | null;
   etag: string | null;
+  /** Which version of the readers last read this board in full (see READER_VERSION). */
+  reader_version?: number;
 }
 
 export interface WatchRow {
@@ -42,6 +44,7 @@ export interface KnownPosting {
   compChecked: boolean;
   locations?: string[];
   workplace?: Posting["workplace"];
+  team?: string;
 }
 
 export interface PostingChanges {
@@ -52,6 +55,8 @@ export interface PostingChanges {
   closed: string[];
   /** Details just looked up for postings already stored: pay, and places when the list lacked them. */
   priced: { id: string; comp?: Posting["comp"]; locations?: string[]; workplace?: Posting["workplace"] }[];
+  /** Stored postings whose team is newly known or has changed. */
+  teamed: { id: string; team: string }[];
 }
 
 export interface MatchRow {
@@ -60,7 +65,7 @@ export interface MatchRow {
   where_label: string | null;
   flags: string[];
   /** Set for near misses: the one check that failed, and why. */
-  near_miss?: "seniority" | "location" | "pay" | "age" | null;
+  near_miss?: "title" | "seniority" | "location" | "pay" | "age" | null;
   miss_detail?: string | null;
 }
 
@@ -123,6 +128,7 @@ function postingRow(companyId: number, p: Posting, at: string) {
     workplace: p.workplace ?? null,
     url: p.url,
     ats_posted_at: p.atsPostedAt ?? null,
+    team: p.team ?? null,
     comp_min: p.comp ? Math.round(p.comp.min) : null,
     comp_max: p.comp ? Math.round(p.comp.max) : null,
     comp_currency: p.comp?.currency ?? null,
@@ -187,10 +193,10 @@ export class SupabaseStore implements Store {
 
   async knownPostings(company: CompanyRow) {
     const rows = await this.all<any>("load postings", (a, b) =>
-      this.db.from("postings").select("id, first_seen_at, ats_posted_at, closed_at, comp_min, comp_max, comp_currency, comp_checked, locations, workplace").eq("company_id", company.id).order("id").range(a, b),
+      this.db.from("postings").select("id, first_seen_at, ats_posted_at, closed_at, comp_min, comp_max, comp_currency, comp_checked, locations, workplace, team").eq("company_id", company.id).order("id").range(a, b),
     );
     return new Map<string, KnownPosting>(
-      rows.map((r) => [r.id, { firstSeenAt: r.first_seen_at, atsPostedAt: r.ats_posted_at ?? undefined, closed: r.closed_at !== null, comp: compOf(r), compChecked: r.comp_checked, locations: r.locations ?? [], workplace: r.workplace ?? undefined }]),
+      rows.map((r) => [r.id, { firstSeenAt: r.first_seen_at, atsPostedAt: r.ats_posted_at ?? undefined, closed: r.closed_at !== null, comp: compOf(r), compChecked: r.comp_checked, locations: r.locations ?? [], workplace: r.workplace ?? undefined, team: r.team ?? undefined }]),
     );
   }
 
@@ -209,6 +215,14 @@ export class SupabaseStore implements Store {
       const places = locations ? { locations, workplace: workplace ?? null } : {};
       this.check(await this.db.from("postings").update({ ...pay, ...places, comp_checked: true }).eq("id", id), "save pay");
     }
+    // Many postings share a team, so save team by team rather than row by row.
+    const byTeam = new Map<string, string[]>();
+    for (const { id, team } of ch.teamed) byTeam.set(team, [...(byTeam.get(team) ?? []), id]);
+    for (const [team, ids] of byTeam) {
+      for (let i = 0; i < ids.length; i += 100) {
+        this.check(await this.db.from("postings").update({ team }).in("id", ids.slice(i, i + 100)), "save teams");
+      }
+    }
   }
 
   async openPostings(company: CompanyRow) {
@@ -225,6 +239,7 @@ export class SupabaseStore implements Store {
       workplace: r.workplace ?? undefined,
       url: r.url,
       atsPostedAt: r.ats_posted_at ?? undefined,
+      team: r.team ?? undefined,
       comp: compOf(r),
       compChecked: r.comp_checked,
       companyId: company.id,

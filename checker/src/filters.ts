@@ -1,3 +1,4 @@
+import { defaultTeams } from "../../shared/criteria.js";
 import type { Criteria, FilterResult, Filters, Posting } from "./types.js";
 
 const lower = (xs: unknown): string[] =>
@@ -15,6 +16,7 @@ export function toFilters(c: Criteria | null | undefined): Filters {
     remote: { allowed: c?.remote?.allowed ?? false, countries: (c?.remote?.countries ?? []).map((x) => x.toUpperCase()) },
     comp_floor: c?.comp_floor ?? {},
     max_age_days: c?.max_age_days && c.max_age_days > 0 ? c.max_age_days : undefined,
+    teams: { include: c?.teams?.include ? lower(c.teams.include) : defaultTeams(c?.titles?.include), email: !!c?.teams?.email },
   };
 }
 
@@ -36,11 +38,44 @@ const OTHER_REGIONS = [
   "estonia", "israel", "korea",
 ];
 
+const OUTSIDE = "title outside role family";
+
 export function titleCheck(title: string, f: Filters): string | undefined {
   if (!f.titles.include.length) return "no job titles set in your filters";
-  if (!f.titles.include.some((t) => hasTerm(title, t))) return "title outside role family";
+  if (!f.titles.include.some((t) => hasTerm(title, t))) return OUTSIDE;
   const ex = f.titles.exclude.find((t) => hasTerm(title, t));
   return ex ? `title excluded ("${ex}")` : undefined;
+}
+
+// Titles that name another line of work. A product team's engineers and designers sit on that team
+// too; they aren't the job someone watching product roles is after.
+const OTHER_CRAFTS = [
+  "engineer", "engineering", "developer", "architect", "designer", "design", "scientist", "researcher", "research",
+  "analyst", "recruiter", "recruiting", "counsel", "attorney", "paralegal", "accountant", "accounting", "writer",
+  "editor", "marketing", "sales", "account executive", "support", "assistant", "coordinator", "intern",
+];
+
+/** A team word matches whole words in a team's name, with or without a plural s ("product" in "Commercial Products"). */
+const onTeam = (team: string, word: string) => hasTerm(team, word) || hasTerm(team, `${word}s`);
+
+/**
+ * The watched team a role is on, when its title isn't in the person's list but doesn't rule it out
+ * either: none of their skip words, and no other line of work named (unless they look for that one).
+ * Boards file "Senior Manager, Driverless Operating Model" under Commercial Products; this finds it.
+ */
+export function teamCheck(post: Posting, f: Filters): string | undefined {
+  if (!post.team || !f.teams.include.length || !f.titles.include.length) return undefined;
+  if (f.titles.exclude.some((t) => hasTerm(post.title, t))) return undefined;
+  const crafts = OTHER_CRAFTS.filter((c) => !f.titles.include.some((t) => hasTerm(t, c)) && !f.teams.include.includes(c));
+  if (crafts.some((c) => onTeam(post.title, c))) return undefined;
+  // Name the part that matched: "Commercial Products", not "Commercial / Commercial Products".
+  return post.team.split(" / ").find((part) => f.teams.include.some((w) => onTeam(part, w)));
+}
+
+/** In the job family: the title fits, or it's on a watched team. Worth a pay lookup. */
+export function inFamily(post: Posting, f: Filters): boolean {
+  const fail = titleCheck(post.title, f);
+  return !fail || (fail === OUTSIDE && !!teamCheck(post, f));
 }
 
 /**
@@ -79,7 +114,13 @@ const shortMoney = (currency: string, n: number) => `${currency === "CAD" ? "CA$
 export function evaluate(post: Posting, f: Filters, now: Date = new Date()): FilterResult {
   const failed: FilterResult["failed"] = [];
   const titleFail = titleCheck(post.title, f);
-  if (titleFail) failed.push({ check: "title", detail: titleFail });
+  // A title outside the list is still in the family when its team is watched: a near miss, or with
+  // "email me about these too", a match that says why it's here.
+  const team = titleFail === OUTSIDE ? teamCheck(post, f) : undefined;
+  const teamPasses = !!team && f.teams.email;
+  if (titleFail && !teamPasses) {
+    failed.push({ check: "title", detail: team ? `Title isn't in your list, but it's on the ${team} team` : titleFail });
+  }
   const level = seniorityCheck(post, f);
   if (level.fail) failed.push({ check: "seniority", detail: "No senior level in the title" });
 
@@ -93,7 +134,7 @@ export function evaluate(post: Posting, f: Filters, now: Date = new Date()): Fil
     if (days > f.max_age_days) failed.push({ check: "age", detail: `Posted ${days} days ago (your limit: ${f.max_age_days})` });
   }
 
-  const flags = [...loc.flags, ...(level.flag ? [level.flag] : [])];
+  const flags = [...(teamPasses ? [`title isn't in your list; on the ${team} team`] : []), ...loc.flags, ...(level.flag ? [level.flag] : [])];
   if (post.comp) {
     const floor = f.comp_floor[post.comp.currency];
     if (floor !== undefined && post.comp.max < floor) {
@@ -106,14 +147,17 @@ export function evaluate(post: Posting, f: Filters, now: Date = new Date()): Fil
   }
 
   const reasons = failed.map((x) => (x.check === "location" ? `location (${x.detail})` : x.detail));
-  return { pass: failed.length === 0, reasons, failed, flags, where: loc.where };
+  return { pass: failed.length === 0, reasons, failed, flags, where: loc.where, team };
 }
 
 /**
- * A near miss: right job family (title fits), but exactly one other check failed. These are the
- * roles a person might want if they loosened one filter, so they're shown, never emailed.
+ * A near miss: in the job family, but exactly one check failed. Either the title fits and one
+ * other filter hid it, or everything else fits and only the title is off the list while the team
+ * is one being watched. These are the roles a person might want if they loosened one filter, so
+ * they're shown, never emailed.
  */
-export function nearMiss(r: FilterResult): { check: Exclude<FilterResult["failed"][number]["check"], "title">; detail: string } | undefined {
-  if (r.failed.length !== 1 || r.failed[0].check === "title") return undefined;
-  return r.failed[0] as { check: "seniority" | "location" | "pay" | "age"; detail: string };
+export function nearMiss(r: FilterResult): FilterResult["failed"][number] | undefined {
+  if (r.failed.length !== 1) return undefined;
+  if (r.failed[0].check === "title" && !r.team) return undefined;
+  return r.failed[0];
 }

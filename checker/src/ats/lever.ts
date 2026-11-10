@@ -1,5 +1,5 @@
 import type { BoardResult, Posting } from "../types.js";
-import { parseCompText } from "../normalize.js";
+import { parseCompText, teamLabel } from "../normalize.js";
 import { getJsonIfChanged } from "./http.js";
 
 interface LeverJob {
@@ -9,7 +9,7 @@ interface LeverJob {
   createdAt?: number;
   country?: string;
   workplaceType?: string;
-  categories?: { location?: string; allLocations?: string[] };
+  categories?: { location?: string; allLocations?: string[]; department?: string; team?: string };
   salaryRange?: { min?: number; max?: number; currency?: string; interval?: string };
   descriptionPlain?: string;
   additionalPlain?: string;
@@ -42,6 +42,7 @@ export async function fetchLever(board: string, company: string, etag?: string):
       workplace: wt === "remote" || wt === "hybrid" || wt === "onsite" ? wt : undefined,
       url: j.hostedUrl,
       atsPostedAt: j.createdAt ? new Date(j.createdAt).toISOString() : undefined,
+      team: teamLabel(j.categories?.department, j.categories?.team),
       comp,
       compChecked: true,
     } satisfies Posting;

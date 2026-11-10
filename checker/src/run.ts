@@ -2,12 +2,19 @@ import { boardUrl, detailFetchers, fetchers } from "./ats/index.js";
 import { baselineEmail, healthEmail, matchEmail, type BaselineCompany, type Mailer } from "./email.js";
 import { withWatchFilters } from "../../shared/criteria.js";
 import { runDiscover, type LookupPay, type SearchSource } from "./discover/run.js";
-import { evaluate, nearMiss, titleCheck, toFilters } from "./filters.js";
+import { evaluate, inFamily, nearMiss, toFilters } from "./filters.js";
 import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "./store.js";
 import type { Ats, BoardResult, Details, Filters, FilterResult, Posting } from "./types.js";
 
 /** Consecutive failed checks before we email about a broken board (2 = about two hours). */
 export const FAILURE_ALERT_AFTER = 2;
+
+/**
+ * Raise this when the readers start collecting something new for every posting (1: teams). Boards
+ * last read by an older version are read in full once, even if unchanged, so what's already stored
+ * gets it too.
+ */
+export const READER_VERSION = 1;
 
 /** Cap on per-posting detail lookups per board per run, so a big new watcher can't stall a run. */
 export const MAX_PAY_LOOKUPS = 40;
@@ -83,7 +90,8 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     await mapLimit([...companies.values()], 4, async (c) => {
       let patch: Partial<CompanyRow>;
       try {
-        const result = await fetch(c.ats, c.board, c.name, c.etag ?? undefined);
+        const current = (c.reader_version ?? 0) >= READER_VERSION;
+        const result = await fetch(c.ats, c.board, c.name, current ? c.etag ?? undefined : undefined);
         fetched.set(c.id, result);
         patch = { last_checked_at: iso, last_ok_at: iso, last_error: null, consecutive_failures: 0, failure_alert_sent: false };
         if (!result.unchanged) patch.open_postings = result.postings.length;
@@ -99,7 +107,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     summary.companies_checked = companies.size;
 
     // 2. Save only what changed on each board and work out what's open. Unchanged or failed boards
-    //    use what's stored. Pay is looked up once per posting, only if its title fits someone.
+    //    use what's stored. Pay is looked up once per posting, only if it's in someone's job family.
     // The filters for one watch: the person's usual ones plus any tweaks for that company.
     const personById = new Map(people.map((p) => [p.id, p]));
     const filterCache = new Map<number, Filters>();
@@ -112,7 +120,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     const open = new Map<number, StoredPosting[]>();
     for (const c of companies.values()) {
       const result = fetched.get(c.id);
-      const changes: PostingChanges = { added: [], reopened: [], closed: [], priced: [] };
+      const changes: PostingChanges = { added: [], reopened: [], closed: [], priced: [], teamed: [] };
       let postings: StoredPosting[];
       let known: Map<string, KnownPosting> | undefined;
       if (!result || result.unchanged) {
@@ -128,6 +136,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
           return {
             ...p,
             atsPostedAt: k.atsPostedAt ?? p.atsPostedAt,
+            team: p.team ?? k.team,
             comp: p.comp ?? k.comp,
             compChecked: p.compChecked || k.compChecked,
             ...(placesKnown ? { locations: k.locations!, workplace: k.workplace ?? p.workplace } : {}),
@@ -142,7 +151,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
 
       const watchers = watches.filter((w) => w.company_id === c.id).map(filtersFor).filter((f): f is Filters => !!f);
       const needPay = postings
-        .filter((p) => p.compChecked === false && watchers.some((f) => !titleCheck(p.title, f)))
+        .filter((p) => p.compChecked === false && watchers.some((f) => inFamily(p, f)))
         .slice(0, MAX_PAY_LOOKUPS);
       const placesRead = new Set<string>();
       await mapLimit(needPay, 4, async (p) => {
@@ -165,11 +174,16 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
       changes.priced = needPay
         .filter((p) => p.compChecked && (!known || known.has(p.id)))
         .map((p) => ({ id: p.id, comp: p.comp, ...(placesRead.has(p.id) ? { locations: p.locations, workplace: p.workplace } : {}) }));
-      if (changes.added.length + changes.reopened.length + changes.closed.length + changes.priced.length) {
+      changes.teamed = known
+        ? postings.flatMap((p) => (p.team && known!.has(p.id) && known!.get(p.id)!.team !== p.team ? [{ id: p.id, team: p.team }] : []))
+        : [];
+      if (changes.added.length + changes.reopened.length + changes.closed.length + changes.priced.length + changes.teamed.length) {
         await store.applyPostingChanges(c, changes, iso);
       }
       // Only remember the version tag once its changes are saved, or a crash could skip them for good.
-      if (result && !result.unchanged && result.etag !== c.etag) await store.updateCompany(c.id, { etag: result.etag ?? null });
+      if (result && !result.unchanged && (result.etag !== c.etag || (c.reader_version ?? 0) < READER_VERSION)) {
+        await store.updateCompany(c.id, { etag: result.etag ?? null, reader_version: READER_VERSION });
+      }
       summary.new_postings += changes.added.length;
       open.set(c.id, postings);
     }

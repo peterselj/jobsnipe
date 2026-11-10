@@ -11,6 +11,8 @@ export interface Filters {
   remote: { allowed: boolean; countries: string[] };
   comp_floor: Record<string, number>;
   max_age_days?: number;
+  /** Team-name words that bring in a role whose title isn't listed; `email` makes it a full match. */
+  teams: { include: string[]; email: boolean };
 }
 
 export interface Person {
@@ -37,6 +39,8 @@ export interface Posting {
   workplace?: "remote" | "hybrid" | "onsite";
   url: string;
   atsPostedAt?: string;
+  /** The department and team the board files it under, e.g. "Commercial / Commercial Products". */
+  team?: string;
   comp?: { min: number; max: number; currency: string };
   /** False when the board's list leaves pay out and we haven't fetched this posting's details yet. */
   compChecked?: boolean;
@@ -69,4 +73,6 @@ export interface FilterResult {
   flags: string[];
   /** Which configured area or remote scope matched. */
   where?: string;
+  /** The watched team it's on, when that (not its title) is why it's in the job family. */
+  team?: string;
 }

@@ -1,5 +1,5 @@
 import type { BoardResult, Posting } from "../types.js";
-import { parseCompText } from "../normalize.js";
+import { parseCompText, teamLabel } from "../normalize.js";
 import { getJsonIfChanged } from "./http.js";
 
 interface AshbyLocation {
@@ -11,6 +11,8 @@ interface AshbyJob extends AshbyLocation {
   id: string;
   title: string;
   jobUrl: string;
+  department?: string;
+  team?: string;
   isListed?: boolean;
   workplaceType?: string;
   publishedAt?: string;
@@ -71,6 +73,7 @@ export async function fetchAshby(board: string, company: string, etag?: string):
         workplace: wt === "remote" ? "remote" : wt === "hybrid" ? "hybrid" : wt === "onsite" ? "onsite" : undefined,
         url: j.jobUrl,
         atsPostedAt: j.publishedAt,
+        team: teamLabel(j.department, j.team),
         comp: compOf(j),
         compChecked: true,
       } satisfies Posting;

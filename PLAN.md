@@ -38,7 +38,9 @@ Work items:
 ## Near misses: where they can go
 
 A near miss is a role in your job family (title fits) that failed exactly **one** other check: pay,
-place or level. Two or more misses is noise; title misses are the wrong job. They're never emailed.
+place or level. Two or more misses is noise; title misses are the wrong job, with one exception:
+a role on a team you watch (see "Built (Nov 10)") that passes everything but the title. They're never
+emailed.
 
 Places they can surface, and what's built:
 
@@ -83,6 +85,15 @@ Places they can surface, and what's built:
   page for its places and pay when its title fits someone. Also: a company's own careers-site link is
   turned into a name to try (careers.doordash.com → DoorDash, whose board is Greenhouse "doordashusa"),
   a `?gh_jid=` in it picks the board that has that job, and "usa"/"us" are tried as name endings.
+- **Built (Nov 10): teams.** Waabi filed "Senior Manager, Driverless Operating Model" under its
+  Commercial Products team; with no "product" in the title it vanished without a trace. The readers
+  now keep each job's department and team (Lever, Ashby; Greenhouse with a second read when a board
+  changes; not Workday yet). A role whose title isn't in your list, on a team named with one of your
+  team words (worked out from your titles until you set them: "product"), that passes every other
+  filter, shows under Near misses → Team; a Settings checkbox emails them instead. Titles naming
+  another line of work (engineer, designer, analyst, ...) or one of your skip words stay out: on the
+  11 boards watched that day, 8 roles of about 2,300, where the team name alone would have brought in
+  40. Boards are read in full once after the change so jobs already stored get their teams.
 - **More boards, next:** SmartRecruiters, Workable, Recruitee and BambooHR all have public job lists
   like Greenhouse's. Truly custom career sites (Google, Apple, Amazon, Meta) each need their own reader.
   The checker could also look inside a "not monitored" company's careers page for a board it links to.

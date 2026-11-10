@@ -139,6 +139,14 @@ describe('database', () => {
     expect((await db.query(`select has_function_privilege('service_role', 'public.sync_matches(uuid, jsonb)', 'execute') as ok`)).rows).toEqual([{ ok: true }]);
   });
 
+  it('0011: postings carry a team, boards a reader version, and a near miss can be the title', async () => {
+    await db.exec(`update postings set team = 'Commercial / Commercial Products' where id = 'greenhouse:acme:1'`);
+    expect((await db.query<{ reader_version: number }>(`select reader_version from companies limit 1`)).rows[0].reader_version).toBe(0);
+    await db.exec(`select sync_matches('${JOSH}', '[{"posting_id":"greenhouse:acme:1","where_label":"NYC area","flags":[],"near_miss":"title","miss_detail":"on the Commercial Products team"}]')`);
+    expect((await db.query(`select near_miss from matches where profile_id = '${JOSH}'`)).rows).toEqual([{ near_miss: 'title' }]);
+    await expect(db.exec(`update matches set near_miss = 'vibes'`)).rejects.toThrow(/near_miss/);
+  });
+
   it('lets people pause alerts and set per-company filters on their own watches only', async () => {
     await as(JOSH, `update profiles set alerts_paused = true`);
     expect((await db.query(`select alerts_paused from profiles where id = '${JOSH}'`)).rows).toEqual([{ alerts_paused: true }]);
