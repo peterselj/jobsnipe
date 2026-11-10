@@ -226,8 +226,8 @@ describe('suggestions from your decisions', () => {
 });
 
 describe('Send to JobBoard', () => {
-  it('builds a link that fills in JobBoard, and is off until turned on', async () => {
-    const { jobBoardEnabled, jobBoardLink, setJobBoardEnabled } = await import('../src/lib/jobboard');
+  it('builds a link that fills in JobBoard, and carries the old per-browser switch over once', async () => {
+    const { jobBoardLink, takeBrowserSetting } = await import('../src/lib/jobboard');
     const link = new URL(jobBoardLink({ title: 'Senior PM, Billing', company: 'Acme & Co', url: 'https://job-boards.greenhouse.io/acme/jobs/1', where: 'NYC area', comp: { min: 180000, max: 220000.4, currency: 'USD' } }));
     expect(link.origin + link.pathname).toBe('https://peterselj.github.io/JobBoard/');
     expect(Object.fromEntries(link.searchParams)).toEqual({
@@ -235,12 +235,10 @@ describe('Send to JobBoard', () => {
     });
     expect(new URL(jobBoardLink({ title: 'PM', company: 'X', url: 'javascript:alert(1)' })).searchParams.has('url')).toBe(false);
 
-    const saved = new Map<string, string>();
-    const store = { getItem: (k: string) => saved.get(k) ?? null, setItem: (k: string, v: string) => void saved.set(k, v), removeItem: (k: string) => void saved.delete(k) };
-    expect(jobBoardEnabled(store)).toBe(false);
-    setJobBoardEnabled(true, store);
-    expect(jobBoardEnabled(store)).toBe(true);
-    setJobBoardEnabled(false, store);
-    expect(jobBoardEnabled(store)).toBe(false);
+    // The old per-browser switch is reported once, then forgotten, so it can move to the account.
+    const saved = new Map<string, string>([['jobsnipe.sendToJobBoard', '1']]);
+    const store = { getItem: (k: string) => saved.get(k) ?? null, removeItem: (k: string) => void saved.delete(k) };
+    expect(takeBrowserSetting(store)).toBe(true);
+    expect(takeBrowserSetting(store)).toBe(false);
   });
 });

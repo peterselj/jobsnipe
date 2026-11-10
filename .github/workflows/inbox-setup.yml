@@ -40,6 +40,10 @@ jobs:
           # The response has only the new webhook's id (or an error message), nothing secret.
           cat response.json; echo
           if [ "$status" -ge 300 ]; then
-            echo "::error::Brevo refused. If it says the key isn't allowed, the API key needs webhook access (see docs/SETUP.md)."
+            if grep -q 'not found or is inactive' response.json; then
+              echo "::error::Brevo can't see MX records for $DOMAIN. Add them where the domain's DNS is managed (docs/SETUP.md section 5, step 2), wait a few minutes, and run this again. This is not a problem with the API key."
+            else
+              echo "::error::Brevo refused (its answer is in the log above). If it says the key isn't allowed, the API key needs webhook access (see docs/SETUP.md)."
+            fi
             exit 1
           fi
