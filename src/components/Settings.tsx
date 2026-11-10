@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { tooBroadTitles } from '../../shared/criteria';
 import { money } from '../../shared/format';
 import { INBOX_DOMAIN } from '../lib/inbox';
 import type { Criteria, DigestEvery, DiscoverSource, InboxEmail, Match, Profile } from '../lib/types';
@@ -131,6 +132,12 @@ export default function Settings({ profile, nearMisses, discoverSources, inboxEm
           <Field label="Titles containing any of" hint="Comma-separated, any case. Example: product manager, head of product">
             <Input value={include} onChange={(e) => setInclude(e.target.value)} placeholder="product manager, account manager" />
           </Field>
+          {tooBroadTitles(toList(include)).map((word) => (
+            <p key={word} className={hint} style={{ marginTop: 0 }}>
+              <b>“{word}”</b> by itself matches every {word} role in any field (sales, engineering…), in your inbox and in Discover. Did you mean
+              something like “{word} of product”? “{word[0].toUpperCase() + word.slice(1)}” already counts as a level under <i>Senior and up only</i>.
+            </p>
+          ))}
           <Field label="But not containing" hint="Example: product marketing, intern, associate">
             <Input value={exclude} onChange={(e) => setExclude(e.target.value)} />
           </Field>

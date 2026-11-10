@@ -114,3 +114,11 @@ describe('adding a role by hand', () => {
     for (const bad of ['javascript:alert(1)', 'data:text/html,x', 'JAVASCRIPT:alert(1)', ' vbscript:x', 'not a link', '', null, undefined]) expect(safeHttpUrl(bad)).toBeUndefined();
   });
 });
+
+describe('title entries that are too broad', () => {
+  it('flags a level word by itself, and nothing else', async () => {
+    const { tooBroadTitles } = await import('../shared/criteria');
+    expect(tooBroadTitles(['product manager', 'Director', 'director of product', ' lead ', 'head of product', 'designer'])).toEqual(['director', 'lead']);
+    expect(tooBroadTitles(undefined)).toEqual([]);
+  });
+});

@@ -73,6 +73,14 @@ export interface DiscoverMatchRow {
   on_list?: boolean;
 }
 
+/** A role someone decided on or archived (the page saves the company and title alongside). */
+export interface HandledRow {
+  profile_id: string;
+  posting_id: string;
+  company: string | null;
+  title: string | null;
+}
+
 export interface RunSummary {
   companies_checked: number;
   new_postings: number;
@@ -97,6 +105,8 @@ export interface Store {
   /** `${profile_id}|${posting_id}` for every alert already sent. */
   alerted(): Promise<Set<string>>;
   recordAlerts(rows: { profile_id: string; posting_id: string }[]): Promise<void>;
+  /** Every role anyone has marked Interested, Not for me, or archived. */
+  handled(): Promise<HandledRow[]>;
   markBaselined(watchIds: number[], at: string): Promise<void>;
   /** Make a person's matches exactly `rows`, in one transaction (the inbox never sees a gap). */
   syncMatches(profileId: string, rows: MatchRow[]): Promise<void>;
@@ -243,6 +253,12 @@ export class SupabaseStore implements Store {
       this.db.from("alerts").select("profile_id, posting_id").order("posting_id").range(a, b),
     );
     return new Set(rows.map((r) => `${r.profile_id}|${r.posting_id}`));
+  }
+
+  async handled() {
+    return this.all<HandledRow>("load handled roles", (a, b) =>
+      this.db.from("verdicts").select("profile_id, posting_id, company, title").order("profile_id").order("posting_id").range(a, b),
+    );
   }
 
   async recordAlerts(rows: { profile_id: string; posting_id: string }[]) {

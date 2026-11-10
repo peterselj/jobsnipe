@@ -3,6 +3,7 @@ import { linkOwner } from '../../shared/ats';
 import { safeHttpUrl } from '../../shared/url';
 import { ago, money } from '../../shared/format';
 import { isManual } from '../lib/addRole';
+import { postingDescription, postingForResume, resumeMachineLink } from '../lib/posting';
 import type { DigestEvery, DiscoverSource, Feedback, Match, NewWatch, Verdict } from '../lib/types';
 import FindBoard from './FindBoard';
 import { Button } from './ui';
@@ -323,6 +324,22 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
 function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: boolean }; verdict?: Verdict; onVerdict: Props['onVerdict']; onWatch: Props['onWatch'] }) {
   const [asking, setAsking] = useState(false);
   const [finding, setFinding] = useState(false);
+  // Tailor resume: the posting's text (when its board can be read) and whether it reached the clipboard.
+  const [tailor, setTailor] = useState<null | 'reading' | { text?: string; copied: boolean }>(null);
+  const copyPosting = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false; // some browsers only allow copying straight from a click; the Copy button covers that
+    }
+  };
+  const startTailor = async () => {
+    setTailor('reading');
+    const description = await postingDescription(m);
+    const text = description ? postingForResume(m, description) : undefined;
+    setTailor({ text, copied: text ? await copyPosting(text) : false });
+  };
   const [watching, setWatching] = useState(false);
   // Watch: straight away when we know the company's board, otherwise look for it first.
   const watch = async () => {
@@ -406,6 +423,11 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           ) : verdict ? (
             <>
               <Button size="sm" onClick={archive} title="Done with this role: move it to the Archive">Archive →</Button>
+              {interested && !tailor && (
+                <Button size="sm" variant="ghost" onClick={startTailor} title="Tailor your resume to this role with ResumeMachine, in your own AI assistant">
+                  Tailor resume
+                </Button>
+              )}
               <Button size="sm" variant="ghost" onClick={() => onVerdict(m, null)}>{manual ? 'Remove' : '↩ Back to inbox'}</Button>
             </>
           ) : (
@@ -424,6 +446,38 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           )}
         </div>
       </div>
+
+      {tailor && (
+        <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3 text-sm sm:flex-row sm:items-center">
+          {tailor === 'reading' ? (
+            <span className="text-muted">Reading the posting…</span>
+          ) : (
+            <>
+              <span className="min-w-0 flex-1 text-ink-soft">
+                {tailor.copied
+                  ? '✓ The posting is on your clipboard. Paste it into your ResumeMachine chat.'
+                  : tailor.text
+                  ? 'The posting is ready to copy.'
+                  : "This site's posting can't be read from here. Open the job, copy its text, and paste it into your ResumeMachine chat."}
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {tailor.text && !tailor.copied && (
+                  <Button size="sm" onClick={async () => setTailor({ text: tailor.text, copied: await copyPosting(tailor.text!) })}>Copy posting</Button>
+                )}
+                <a
+                  href={resumeMachineLink(m, tailor.copied)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-md bg-forest px-2.5 py-1 text-[13px] font-semibold text-white hover:bg-forest-deep"
+                >
+                  Open ResumeMachine →
+                </a>
+                <Button size="sm" variant="ghost" onClick={() => setTailor(null)}>Close</Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {finding && (
         <FindBoard

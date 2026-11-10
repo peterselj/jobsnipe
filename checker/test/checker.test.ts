@@ -358,6 +358,28 @@ describe("paused alerts", () => {
   });
 });
 
+describe("reposts", () => {
+  it("a role you already handled, re-listed under a new id, is flagged and not emailed again", async () => {
+    const { store, sent, mailer } = setup();
+    let board = [job("1")];
+    const fetch = async () => ({ postings: board });
+    await runCheck({ store, mailer, fetch, now: at(1) });
+    // Josh passes on it (the page saves the company and title with the decision); Acme then takes it
+    // down and re-lists it as job 2, next to a genuinely new job 3.
+    store.verdicts.push({ profile_id: JOSH, posting_id: "greenhouse:acme:1", company: "Acme", title: "Senior Product Manager" });
+    board = [job("2"), job("3", "Senior Product Manager, Growth")];
+    await runCheck({ store, mailer, fetch, now: at(2) });
+
+    expect(sent.filter((e) => e.subject.startsWith("New match")).map((e) => e.subject)).toEqual(["New match: Senior Product Manager, Growth at Acme (NYC area)"]);
+    const rows = store.matches.get(JOSH)!;
+    expect(rows.find((m) => m.posting_id === "greenhouse:acme:2")!.flags).toContain("looks like a repost of a role you already handled");
+    expect(rows.find((m) => m.posting_id === "greenhouse:acme:3")!.flags).not.toContain("looks like a repost of a role you already handled");
+    // Not retried next hour either.
+    await runCheck({ store, mailer, fetch, now: at(3) });
+    expect(sent.filter((e) => e.subject.startsWith("New match"))).toHaveLength(1);
+  });
+});
+
 describe("age limit", () => {
   it("keeps old postings out of matches and emails, as near misses", async () => {
     const { store, sent, mailer } = setup();

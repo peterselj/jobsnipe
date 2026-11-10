@@ -5,6 +5,7 @@ import { greenhouseDetails } from "../ats/greenhouse.js";
 import { workdayDetails } from "../ats/workday.js";
 import { digestEmail, matchEmail, type Mailer } from "../email.js";
 import { evaluate, titleCheck, toFilters } from "../filters.js";
+import { companyKey, type Handled, REPOST_FLAG } from "../reposts.js";
 import type { CompanyRow, Store, WatchRow } from "../store.js";
 import type { BoardResult, Filters, Person, Posting } from "../types.js";
 import { jobsFromEmail } from "./email.js";
@@ -39,14 +40,6 @@ const searchSource: SearchSource = async (s, queries, fits) => {
   const collectionId = s.collection_id ?? (await getroCollectionId(s.host));
   return { jobs: await searchGetro(collectionId, queries, s.name, fits), collectionId };
 };
-
-/** "Acme AI, Inc." and "acme" are the same company for "is it already on my list?". */
-export function companyKey(name: string): string {
-  const words = name.toLowerCase().replace(/&/g, " and ").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
-  const drop = new Set(["inc", "llc", "ltd", "corp", "co", "the", "ai", "labs", "hq", "technologies", "technology"]);
-  const kept = words.filter((w) => !drop.has(w));
-  return (kept.length ? kept : words).join("");
-}
 
 /**
  * VC boards sometimes list the same job twice under different companies (Salesforce's Slack jobs
@@ -138,6 +131,8 @@ export interface DiscoverOptions {
   now: Date;
   search?: SearchSource;
   lookupPay?: LookupPay;
+  /** Roles people already handled, to flag reposts (and leave them out of the digest). */
+  handled?: Handled;
   log?: (msg: string) => void;
   redact: (s: string) => string;
 }
@@ -252,7 +247,10 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
           .flatMap((j) => {
             // An emailed job at a company on your list you can't check directly is one for your Inbox.
             const inbox = !!j.forProfile && unmonitored.has(companyKey(j.company));
-            return inbox || !onList(j, boards, names) ? [{ j, r: evaluate(asPosting(j), f, now), onList: inbox }] : [];
+            if (!inbox && onList(j, boards, names)) return [];
+            const r = evaluate(asPosting(j), f, now);
+            if (r.pass && o.handled?.isRepost(person.id, j)) r.flags = [...r.flags, REPOST_FLAG];
+            return [{ j, r, onList: inbox }];
           })
           .filter(({ r }) => r.pass);
     const listed = all.filter((x) => x.onList);
@@ -266,7 +264,7 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
       const key = `${person.id}|${j.id}`;
       if (alerted.has(key)) continue;
       try {
-        if (!person.alerts_paused) await o.mailer.send(matchEmail(person.email, { ...asPosting(j), company: `${j.company} (${j.via.join(", ")})` }, r, now));
+        if (!person.alerts_paused && !r.flags.includes(REPOST_FLAG)) await o.mailer.send(matchEmail(person.email, { ...asPosting(j), company: `${j.company} (${j.via.join(", ")})` }, r, now));
         alerted.add(key);
         newAlerts.push({ profile_id: person.id, posting_id: j.id });
         if (!person.alerts_paused) out.emails++;
@@ -278,7 +276,7 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
     if (!digestDue(person, now)) continue;
     const since = person.last_digest_at ? Date.parse(person.last_digest_at) : 0;
     const fresh = passing
-      .filter(({ j }) => Date.parse(j.firstSeenAt ?? iso) > since)
+      .filter(({ j, r }) => Date.parse(j.firstSeenAt ?? iso) > since && !r.flags.includes(REPOST_FLAG))
       .sort((a, b) => (b.j.postedAt ?? "").localeCompare(a.j.postedAt ?? ""));
     try {
       // Paused or nothing new: no email, but the clock still moves, so the rhythm holds.

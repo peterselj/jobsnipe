@@ -1,6 +1,6 @@
 import type { InboundEmail } from "../src/discover/email.js";
 import type { DiscoverJob, DiscoverSourceRow } from "../src/discover/types.js";
-import type { CompanyRow, DiscoverMatchRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "../src/store.js";
+import type { CompanyRow, DiscoverMatchRow, HandledRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "../src/store.js";
 import type { Person } from "../src/types.js";
 
 /** In-memory Store for tests; mirrors what SupabaseStore does against the real tables. */
@@ -68,6 +68,10 @@ export class MemoryStore implements Store {
   }
   async alerted() {
     return new Set(this.alerts);
+  }
+  verdicts: HandledRow[] = [];
+  async handled() {
+    return this.verdicts;
   }
   async recordAlerts(rows: { profile_id: string; posting_id: string }[]) {
     for (const r of rows) this.alerts.add(`${r.profile_id}|${r.posting_id}`);
