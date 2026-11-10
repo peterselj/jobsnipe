@@ -13,12 +13,17 @@ export interface DataSource {
   removeWatch(watchId: number): Promise<void>;
   /** null = back to the usual filters for this company. */
   setWatchFilters(watchId: number, filters: WatchFilters | null): Promise<void>;
-  saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused' | 'digest_every'>>): Promise<void>;
+  saveProfile(patch: Partial<Pick<Profile, 'name' | 'criteria' | 'alerts_paused' | 'digest_every'>>): Promise<void>;
   /** Permanently delete the signed-in account and everything about it. */
   deleteAccount(): Promise<void>;
   /** Starts a check; returns the time to wait for a run after. */
   requestCheck(): Promise<string>;
   latestRun(): Promise<Run | undefined>;
+  /**
+   * Ask to move sign-in and alerts to another address. Nothing changes until the confirmation link
+   * emailed to it is clicked, so alerts can only ever go to an address its owner confirmed.
+   */
+  changeEmail(email: string): Promise<void>;
   /** Turn the job-alert inbox on (a fresh address) or off. Returns the address's first part, or null. */
   setInbox(on: boolean): Promise<string | null>;
 }
@@ -224,9 +229,14 @@ export class SupabaseSource implements DataSource {
     fail('Saving company filters', error);
   }
 
-  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused' | 'digest_every'>>) {
+  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'criteria' | 'alerts_paused' | 'digest_every'>>) {
     const { error } = await this.db.from('profiles').update(patch).eq('id', this.userId);
     fail('Saving settings', error);
+  }
+
+  async changeEmail(email: string) {
+    const { error } = await this.db.auth.updateUser({ email }, { emailRedirectTo: location.origin + location.pathname });
+    fail('Changing your email', error);
   }
 
   async setInbox(on: boolean) {

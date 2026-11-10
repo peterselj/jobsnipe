@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { parseBoardUrl } from "../../../shared/ats.js";
+import { safeHttpUrl } from "../../../shared/url.js";
 import type { DiscoverJob } from "./types.js";
 
 // Jobs from job-alert emails (LinkedIn, Indeed, Wellfound, VC boards...), read without AI: each job
@@ -31,6 +32,8 @@ const JOB_LINK: RegExp[] = [
 const NOT_A_TITLE = /^(view|see|apply|show|more|search|browse|manage|unsubscribe|settings|edit|get|open|learn|easy apply|save|share|privacy|help|jobs? (for|like|you)|new jobs?|all jobs?)\b/i;
 
 export function isJobLink(href: string): boolean {
+  // Emails can come from anyone, so only ordinary web links count (never "javascript:" and the like).
+  if (!safeHttpUrl(href)) return false;
   return JOB_LINK.some((r) => r.test(href)) || !!parseBoardUrl(href)?.board && /\/(jobs?|j|o)\/|gh_jid=|\/[0-9a-f-]{20,}/i.test(href);
 }
 

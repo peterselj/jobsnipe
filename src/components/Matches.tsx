@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { linkOwner } from '../../shared/ats';
+import { safeHttpUrl } from '../../shared/url';
 import { ago, money } from '../../shared/format';
 import type { DigestEvery, DiscoverSource, Feedback, Match, NewWatch, Verdict } from '../lib/types';
 import FindBoard from './FindBoard';
@@ -369,8 +370,8 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
             {isNew && <span className="rounded bg-emerald-100 px-1.5 py-px text-[9.5px] text-forest">New</span>}
             {status && <span className="rounded bg-slate-100 px-1.5 py-px text-[9.5px] normal-case tracking-normal text-ink-soft">{status}</span>}
           </div>
-          {m.url ? (
-            <a href={m.url} target="_blank" rel="noreferrer" className="mt-0.5 block text-[16px] font-bold leading-snug text-forest-2 hover:underline">
+          {safeHttpUrl(m.url) ? (
+            <a href={safeHttpUrl(m.url)} target="_blank" rel="noreferrer" className="mt-0.5 block text-[16px] font-bold leading-snug text-forest-2 hover:underline">
               {m.title}
             </a>
           ) : (

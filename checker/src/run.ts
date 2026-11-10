@@ -1,6 +1,7 @@
 import { boardUrl, detailFetchers, fetchers } from "./ats/index.js";
 import { baselineEmail, healthEmail, matchEmail, type BaselineCompany, type Mailer } from "./email.js";
 import { withWatchFilters } from "../../shared/criteria.js";
+import { safeHttpUrl } from "../../shared/url.js";
 import { runDiscover, type LookupPay, type SearchSource } from "./discover/run.js";
 import { evaluate, nearMiss, titleCheck, toFilters } from "./filters.js";
 import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "./store.js";
@@ -84,6 +85,8 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
       let patch: Partial<CompanyRow>;
       try {
         const result = await fetch(c.ats, c.board, c.name, c.etag ?? undefined);
+        // Only ordinary web links are kept (see shared/url.ts); a job without one can't be shown.
+        if (!result.unchanged) result.postings = result.postings.filter((p) => safeHttpUrl(p.url));
         fetched.set(c.id, result);
         patch = { last_checked_at: iso, last_ok_at: iso, last_error: null, consecutive_failures: 0, failure_alert_sent: false };
         if (!result.unchanged) patch.open_postings = result.postings.length;

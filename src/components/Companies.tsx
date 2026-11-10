@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { safeHttpUrl } from '../../shared/url';
 import { ATS_LABEL, boardLabel, boardUrl } from '../lib/ats';
 import { ago } from '../../shared/format';
 import { describeWatchFilters } from '../../shared/criteria';
@@ -78,7 +79,7 @@ export default function Companies({ watches, criteria, onSetFilters, onAdd, onCh
 function CompanyRow({ w, onFix, onTune, onRemove }: { w: Watch; onFix: () => void; onTune: () => void; onRemove: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const s = STATUS[w.status];
-  const link = w.ats !== 'none' && w.board ? boardUrl(w.ats, w.board) : w.careersUrl;
+  const link = safeHttpUrl(w.ats !== 'none' && w.board ? boardUrl(w.ats, w.board) : w.careersUrl);
   const detail =
     // "HTTP 404 from https://boards-api…/jobs" -> "HTTP 404"; the board link is already on the row.
     w.status === 'failing' ? w.lastError?.replace(/\s+(from|for)\s+https?:\/\/\S+/g, '')

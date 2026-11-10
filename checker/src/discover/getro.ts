@@ -1,4 +1,5 @@
 import { parseBoardUrl } from "../../../shared/ats.js";
+import { safeHttpUrl } from "../../../shared/url.js";
 import { HttpError } from "../ats/http.js";
 import { discoverId, type DiscoverJob } from "./types.js";
 
@@ -42,7 +43,7 @@ export async function getroCollectionId(host: string): Promise<string> {
 }
 
 export function toDiscoverJob(j: GetroJob, via: string): DiscoverJob | undefined {
-  if (!j.title || !j.url) return undefined;
+  if (!j.title || !safeHttpUrl(j.url)) return undefined;
   const wm = j.work_mode?.toLowerCase();
   const min = j.compensation_amount_min_cents;
   const max = j.compensation_amount_max_cents;

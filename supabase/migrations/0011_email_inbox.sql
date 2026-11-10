@@ -1,7 +1,8 @@
 -- Job-alert inbox: each person can get an address (e.g. 7f3k9q2m@alerts.joshpetersel.com) to point
 -- LinkedIn, Indeed, Wellfound or VC-board job alerts at. Run once in Supabase → SQL Editor, BEFORE
 -- merging the PR that needs it. Safe with the code already live: it only adds tables, columns and
--- functions. To undo: drop table public.inbound_emails; and drop the columns and functions below.
+-- functions. To undo: drop table public.inbound_emails, public.private_settings; and drop the columns
+-- and functions below.
 
 -- The address's first part. Null = inbox off (mail to an old address is dropped).
 alter table public.profiles add column inbox_token text unique;
@@ -39,14 +40,32 @@ create index inbound_emails_unprocessed_idx on public.inbound_emails (received_a
 alter table public.inbound_emails enable row level security;
 create policy "read own emails" on public.inbound_emails for select to authenticated using (profile_id = (select auth.uid()));
 
+-- The inbound-email function's address is public, so it only accepts requests that carry this key.
+-- It's made here, kept where only the checker's secret key can read it, and put into Brevo's webhook
+-- address by the "Set up job-alert inbox" workflow. Nobody has to copy it anywhere.
+create table public.private_settings (key text primary key, value text not null);
+alter table public.private_settings enable row level security; -- no policies: secret key only
+revoke all on public.private_settings from anon, authenticated;
+insert into public.private_settings values ('inbox_webhook_key', md5(gen_random_uuid()::text) || md5(gen_random_uuid()::text));
+
+create function public.inbox_webhook_key() returns text
+language sql security definer set search_path = '' as $$
+  select value from public.private_settings where key = 'inbox_webhook_key';
+$$;
+revoke execute on function public.inbox_webhook_key() from public, anon, authenticated;
+grant execute on function public.inbox_webhook_key() to service_role;
+
 -- Called by the inbound-email function: file an email under whoever's address it was sent to. A few
 -- limits keep a flood (it's an address anyone can write to) from piling up.
-create function public.receive_inbound_email(p_token text, p_from_name text, p_from_address text, p_subject text, p_html text, p_text text)
+create function public.receive_inbound_email(p_key text, p_token text, p_from_name text, p_from_address text, p_subject text, p_html text, p_text text)
 returns boolean
 language plpgsql security definer set search_path = '' as $$
 declare
   who uuid;
 begin
+  if p_key is distinct from (select value from public.private_settings where key = 'inbox_webhook_key') then
+    raise exception 'wrong key';
+  end if;
   select id into who from public.profiles where inbox_token = lower(p_token);
   if who is null then return false; end if;
   if (select count(*) from public.inbound_emails where profile_id = who and received_at > now() - interval '1 day') >= 200 then
@@ -56,8 +75,8 @@ begin
   values (who, left(p_from_name, 200), left(p_from_address, 320), left(p_subject, 500), left(p_html, 500000), left(p_text, 200000));
   return true;
 end $$;
-revoke execute on function public.receive_inbound_email(text, text, text, text, text, text) from public, anon, authenticated;
-grant execute on function public.receive_inbound_email(text, text, text, text, text, text) to service_role;
+revoke execute on function public.receive_inbound_email(text, text, text, text, text, text, text) from public, anon, authenticated;
+grant execute on function public.receive_inbound_email(text, text, text, text, text, text, text) to service_role;
 
 -- Jobs found in someone's emails are theirs alone: for_profile says whose (null = found on a VC board,
 -- for everyone). on_list marks a match at a company on the person's list that JobSnipe can't check

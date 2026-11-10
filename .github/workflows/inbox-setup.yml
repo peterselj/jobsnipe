@@ -21,9 +21,17 @@ jobs:
       - name: Create Brevo's inbound webhook
         env:
           BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           DOMAIN: ${{ inputs.domain }}
-          URL: https://hzeciyeirloyzqkjvvln.supabase.co/functions/v1/inbound-email
+          SUPABASE_URL: https://hzeciyeirloyzqkjvvln.supabase.co
         run: |
+          # The webhook address carries a key the database made (0011_email_inbox.sql), so only Brevo
+          # can file mail. It's read here with the secret key and never printed.
+          key=$(curl -sS -X POST "$SUPABASE_URL/rest/v1/rpc/inbox_webhook_key" \
+            -H "apikey: $SUPABASE_SECRET_KEY" -H "Authorization: Bearer $SUPABASE_SECRET_KEY" -H 'content-type: application/json' -d '{}' | jq -r 'if type == "string" then . else empty end')
+          if [ -z "$key" ]; then echo "::error::Couldn't read the inbox key. Has 0011_email_inbox.sql been run?"; exit 1; fi
+          echo "::add-mask::$key"
+          URL="$SUPABASE_URL/functions/v1/inbound-email?key=$key"
           body=$(jq -n --arg url "$URL" --arg domain "$DOMAIN" \
             '{type: "inbound", events: ["inboundEmailProcessed"], url: $url, domain: $domain, description: "JobSnipe job-alert inbox"}')
           status=$(curl -sS -o response.json -w '%{http_code}' -X POST https://api.brevo.com/v3/webhooks \

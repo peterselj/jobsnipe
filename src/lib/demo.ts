@@ -110,6 +110,10 @@ export class DemoSource implements DataSource {
     Object.assign(this.profile, patch);
   }
 
+  async changeEmail(email: string) {
+    this.profile.email = email;
+  }
+
   async setInbox(on: boolean) {
     this.profile.inbox_token = on ? 'demo7f3k2q' : null;
     return this.profile.inbox_token;

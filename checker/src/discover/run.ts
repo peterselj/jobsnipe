@@ -26,6 +26,7 @@ const DIGEST_DAYS = { daily: 1, weekly: 7, biweekly: 14 } as const;
 /** Digest lists stop here; the rest are on the page. */
 export const DIGEST_MAX = 30;
 
+export const MAX_TITLE_SEARCHES = 12;
 /** Pay lookups on companies' own boards per run, so a big first read can't stall the check. */
 export const MAX_PAY_LOOKUPS = 40;
 
@@ -150,7 +151,8 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
 
   const filters = new Map<string, Filters>(o.people.map((p) => [p.id, toFilters(p.criteria)]));
   const searchers = o.people.filter((p) => filters.get(p.id)!.titles.include.length);
-  const queries = [...new Set(searchers.flatMap((p) => filters.get(p.id)!.titles.include))];
+  // Each title is searched on every VC board, so one person's list can't add more than a dozen.
+  const queries = [...new Set(searchers.flatMap((p) => filters.get(p.id)!.titles.include.slice(0, MAX_TITLE_SEARCHES)))];
 
   // 1. Read the boards that are due. Only jobs whose title fits someone are kept.
   if (queries.length) {

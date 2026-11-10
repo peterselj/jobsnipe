@@ -119,7 +119,7 @@ export default function Settings({ profile, nearMisses, discoverSources, inboxEm
         <SectionHeader title="You" />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label="Send alerts to" hint="One email per new match, as it's found.">
+          <Field label="Sign in and send alerts to" hint="One email per new match. Changing it sends a confirmation link first.">
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
         </div>

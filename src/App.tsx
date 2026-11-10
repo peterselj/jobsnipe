@@ -251,11 +251,18 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
               onLeave();
             }}
             onCancel={() => setView('matches')}
-            onSave={async (patch) => {
+            onSave={async ({ email, ...patch }) => {
+              // A new address only takes effect once the link emailed to it is clicked.
+              const moving = email !== snap.profile.email && source.kind !== 'demo';
+              if (email !== snap.profile.email) await source.changeEmail(email);
               await source.saveProfile(patch);
               await reload();
               setView('matches');
-              void runCheck('Re-checked with your new filters.');
+              void runCheck(
+                moving
+                  ? `Saved. To move alerts to ${email}, click the confirmation link just emailed (check both inboxes). Until then they keep going to ${snap.profile.email}.`
+                  : 'Re-checked with your new filters.',
+              );
             }}
           />
         </main>
