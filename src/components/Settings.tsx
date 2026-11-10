@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { tooBroadTitles } from '../../shared/criteria';
+import { stageLabel, tooBroadTitles } from '../../shared/criteria';
 import { money } from '../../shared/format';
 import { INBOX_DOMAIN } from '../lib/inbox';
 import type { Criteria, DigestEvery, DiscoverSource, InboxEmail, Match, Profile } from '../lib/types';
@@ -15,6 +15,11 @@ const COUNTRIES = [
   { code: 'US', label: 'United States' },
   { code: 'CA', label: 'Canada' },
 ];
+
+/** Funding stages from earliest to latest, for listing them in a sensible order. */
+const STAGE_ORDER = ['pre_seed', 'seed', 'series_a', 'series_b', 'series_c', 'series_d', 'series_e', 'series_f', 'growth', 'private_equity', 'ipo', 'acquired', 'other'];
+
+const stageRank = (s: string) => (STAGE_ORDER.includes(s) ? STAGE_ORDER.indexOf(s) : STAGE_ORDER.length);
 
 interface Area {
   name: string;
@@ -34,8 +39,10 @@ function missedPlaces(nearMisses: Match[]): [string, number][] {
 }
 
 /** Name, alert email, filters, pausing, and deleting the account. Saving re-checks right away. */
-export default function Settings({ profile, nearMisses, discoverSources, inboxEmails, onSave, onPause, onDigest, onInbox, onDelete, onCancel }: {
+export default function Settings({ profile, nearMisses, discoverRoles, discoverSources, inboxEmails, onSave, onPause, onDigest, onInbox, onDelete, onCancel }: {
   profile: Profile;
+  /** Roles in Discover right now, for suggesting industries and stages to skip. */
+  discoverRoles: Match[];
   discoverSources: DiscoverSource[];
   inboxEmails: InboxEmail[];
   onInbox: (on: boolean) => Promise<void>;
@@ -61,8 +68,22 @@ export default function Settings({ profile, nearMisses, discoverSources, inboxEm
   const [floorUsd, setFloorUsd] = useState(c.comp_floor?.USD?.toString() ?? '');
   const [floorCad, setFloorCad] = useState(c.comp_floor?.CAD?.toString() ?? '');
   const [maxAge, setMaxAge] = useState(c.max_age_days?.toString() ?? '');
+  const [skipIndustries, setSkipIndustries] = useState(toText(c.discover?.skip_industries));
+  const [skipStages, setSkipStages] = useState<string[]>(c.discover?.skip_stages ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // What the roles in Discover right now would let you skip: their commonest industries (minus ones
+  // already skipped) and the stages their companies are at (plus any you've already ticked).
+  const industryCounts = new Map<string, number>();
+  const stageCounts = new Map<string, number>();
+  for (const m of discoverRoles) {
+    for (const i of new Set(m.industries ?? [])) industryCounts.set(i, (industryCounts.get(i) ?? 0) + 1);
+    if (m.stage) stageCounts.set(m.stage, (stageCounts.get(m.stage) ?? 0) + 1);
+  }
+  const skipping = toList(skipIndustries).map((w) => w.toLowerCase());
+  const topIndustries = [...industryCounts].filter(([name]) => !skipping.some((w) => name.toLowerCase().includes(w))).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const stages = [...new Set([...stageCounts.keys(), ...skipStages])].sort((a, b) => stageRank(a) - stageRank(b) || a.localeCompare(b));
 
   const save = async () => {
     setError(null);
@@ -80,6 +101,7 @@ export default function Settings({ profile, nearMisses, discoverSources, inboxEm
       remote: { allowed: remote, countries: remote ? countries : [] },
       comp_floor,
       max_age_days: num(maxAge),
+      discover: toList(skipIndustries).length || skipStages.length ? { skip_industries: toList(skipIndustries), skip_stages: skipStages } : undefined,
     };
     setSaving(true);
     try {
@@ -232,6 +254,52 @@ export default function Settings({ profile, nearMisses, discoverSources, inboxEm
         </Field>
         {missing('age').length > 0 && (
           <p className={hint}>Your limit is hiding {missing('age').length} open role{missing('age').length > 1 ? 's' : ''} that otherwise fit. See them under Near misses → Age.</p>
+        )}
+      </div>
+
+      <div className={card}>
+        <SectionHeader title="Discover filters" />
+        <p className="mb-3 text-sm text-muted">
+          Only for the Discover tab and its digest: skip whole kinds of company, using what the VC boards say about each one.
+          Companies on your list are never affected.
+        </p>
+        <Field label="Skip industries containing" hint="Comma-separated. “biotech” also skips Biotechnology.">
+          <Input value={skipIndustries} onChange={(e) => setSkipIndustries(e.target.value)} placeholder="biotech, pharma, crypto" />
+        </Field>
+        {topIndustries.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+            Most common in your Discover now:
+            {topIndustries.map(([name, n]) => (
+              <button
+                key={name}
+                type="button"
+                onClick={() => setSkipIndustries(toText([...toList(skipIndustries), name.toLowerCase()]))}
+                className="rounded-full border border-line-strong px-2 py-0.5 text-ink-soft hover:bg-paper"
+                title="Skip this industry"
+              >
+                {name} · {n}
+              </button>
+            ))}
+          </div>
+        )}
+        {stages.length > 0 && (
+          <div className="mt-4">
+            <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[.06em] text-muted">Skip companies at these stages</div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {stages.map((s) => (
+                <label key={s} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    className={check}
+                    checked={skipStages.includes(s)}
+                    onChange={(e) => setSkipStages(e.target.checked ? [...skipStages, s] : skipStages.filter((x) => x !== s))}
+                  />
+                  {stageLabel(s)}
+                  {stageCounts.get(s) ? <span className="text-xs text-muted">· {stageCounts.get(s)}</span> : null}
+                </label>
+              ))}
+            </div>
+          </div>
         )}
       </div>
 

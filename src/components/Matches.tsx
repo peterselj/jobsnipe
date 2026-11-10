@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { linkOwner } from '../../shared/ats';
+import { stageLabel } from '../../shared/criteria';
 import { safeHttpUrl } from '../../shared/url';
 import { ago, money } from '../../shared/format';
 import { isManual } from '../lib/addRole';
@@ -407,7 +408,7 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           {m.flags.length > 0 && <div className="mt-1 text-[13px] text-gold">⚑ {m.flags.join(' · ')}</div>}
           {m.via && !verdict && (
             <div className="mt-1 text-[12px] text-muted">
-              via {m.via.join(', ')}{m.onList ? '' : ' · not on your list'}
+              via {m.via.join(', ')}{m.stage ? ` · ${stageLabel(m.stage)}` : ''}{m.onList ? '' : ' · not on your list'}
               {linksElsewhere(m) && <> · <span className="text-gold">links to {linksElsewhere(m)}</span></>}
             </div>
           )}

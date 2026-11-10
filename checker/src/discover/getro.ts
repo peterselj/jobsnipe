@@ -17,7 +17,7 @@ interface GetroJob {
   compensation_amount_max_cents?: number | null;
   compensation_currency?: string | null;
   compensation_period?: string | null;
-  organization?: { name?: string };
+  organization?: { name?: string; stage?: string | null; industry_tags?: string[] | null };
 }
 
 const HEADERS = { "user-agent": "JobSnipe/0.1 (personal job alerts)", accept: "application/json" };
@@ -61,6 +61,8 @@ export function toDiscoverJob(j: GetroJob, via: string): DiscoverJob | undefined
     ats: board?.ats,
     board: board?.board,
     via: [via],
+    stage: j.organization?.stage || undefined,
+    industries: (j.organization?.industry_tags ?? []).filter((t) => typeof t === "string").slice(0, 30),
   };
 }
 

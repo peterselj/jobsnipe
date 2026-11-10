@@ -16,6 +16,9 @@ export interface DiscoverJob {
   board?: string;
   /** Which VC boards list it. */
   via: string[];
+  /** What the VC board says about the company: funding stage ("series_b") and industries. */
+  stage?: string;
+  industries?: string[];
   /** Pay has been looked up on the company's own board (whether or not it had any). */
   compChecked?: boolean;
   /** Found in this person's job-alert emails: theirs alone. Unset for jobs found on VC boards. */

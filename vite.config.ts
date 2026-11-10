@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 /**
  * A content security policy for the built page: scripts only from this site, and connections only
- * to the database and the three job boards the "find a board" search asks. If a bad link or bit of
+ * to the database and the job boards the "find a board" search asks. If a bad link or bit of
  * text ever got through, the browser still wouldn't run it or let it send data elsewhere. Left off
  * in `npm run dev`, where Vite needs inline scripts.
  */
@@ -14,7 +14,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data:",
-  "connect-src https://hzeciyeirloyzqkjvvln.supabase.co wss://hzeciyeirloyzqkjvvln.supabase.co https://boards-api.greenhouse.io https://api.lever.co https://api.ashbyhq.com",
+  "connect-src https://hzeciyeirloyzqkjvvln.supabase.co wss://hzeciyeirloyzqkjvvln.supabase.co https://boards-api.greenhouse.io https://api.lever.co https://api.ashbyhq.com https://api.smartrecruiters.com",
   "base-uri 'self'",
   "form-action 'self'",
   "object-src 'none'",

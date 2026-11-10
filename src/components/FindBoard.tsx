@@ -75,7 +75,7 @@ export default function FindBoard({ title, initialName, allowUnmonitored = true,
   return (
     <Modal title={title} onClose={onClose}>
       <div className="space-y-3">
-        <Field label="Company name or a job link" hint="A link to any of their job postings is the surest way, e.g. jobs.ashbyhq.com/acme/… For Workday (…myworkdayjobs.com), a link is the only way.">
+        <Field label="Company name or a job link" hint="A link to any of their job postings is the surest way, e.g. jobs.ashbyhq.com/acme/… For Workday (…myworkdayjobs.com), SmartRecruiters and Recruitee, a link is the only way.">
           <div className="flex gap-2">
             <Input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && search()} placeholder="Acme Robotics, or paste a job link" />
             <Button variant="primary" onClick={search} disabled={searching || !query.trim()}>{searching ? 'Looking…' : 'Find'}</Button>
@@ -99,7 +99,7 @@ export default function FindBoard({ title, initialName, allowUnmonitored = true,
                         {h.jobs !== undefined && <span className="ml-2 text-xs font-normal text-muted">{h.jobs} open{h.displayName ? ` · "${h.displayName}"` : ''}{h.hasJob ? ' · has the job you linked' : ''}</span>}
                       </div>
                       {h.sample.length > 0 && <div className="mt-0.5 truncate text-xs text-muted">{h.sample.join(' · ')}</div>}
-                      {h.jobs === undefined && <div className="mt-0.5 text-xs text-muted">Workday boards can't be previewed here; it's read as soon as you add it, and Companies shows if it works.</div>}
+                      {h.jobs === undefined && <div className="mt-0.5 text-xs text-muted">{ATS_LABEL[h.ats]} boards can't be previewed here; it's read as soon as you add it, and Companies shows if it works.</div>}
                     </div>
                     <Button size="sm" variant="primary" disabled={saving} onClick={() => pick({ name, ats: h.ats, board: h.board })}>Use this</Button>
                   </div>
@@ -113,7 +113,8 @@ export default function FindBoard({ title, initialName, allowUnmonitored = true,
                 <p className="text-muted">
                   Tip: many companies' own careers sites are a front for one of these. Open one of their jobs and click
                   Apply; if the page you land on has <span className="font-mono">myworkdayjobs</span>, <span className="font-mono">greenhouse</span>,{' '}
-                  <span className="font-mono">lever</span> or <span className="font-mono">ashby</span> in its address, paste that address above.
+                  <span className="font-mono">lever</span>, <span className="font-mono">ashby</span>, <span className="font-mono">smartrecruiters</span> or{' '}
+                  <span className="font-mono">recruitee</span> in its address, paste that address above.
                 </p>
                 {allowUnmonitored && (<>
                 <Field label="Careers page (optional)">

@@ -300,7 +300,7 @@ export class SupabaseStore implements Store {
       id: j.id, company: j.company, title: j.title, locations: j.locations, workplace: j.workplace ?? null, url: j.url,
       posted_at: j.postedAt ?? null, comp_min: j.comp ? Math.round(j.comp.min) : null, comp_max: j.comp ? Math.round(j.comp.max) : null,
       comp_currency: j.comp?.currency ?? null, ats: j.ats ?? null, board: j.board ?? null, via: j.via,
-      for_profile: j.forProfile ?? null,
+      for_profile: j.forProfile ?? null, stage: j.stage ?? null, industries: j.industries ?? [],
     }));
     for (let i = 0; i < rows.length; i += 500) {
       this.check(await this.db.rpc("save_discover_postings", { p_rows: rows.slice(i, i + 500), p_at: at }), "save discover postings");
@@ -316,6 +316,7 @@ export class SupabaseStore implements Store {
       postedAt: r.posted_at ?? undefined, comp: compOf(r), ats: r.ats ?? undefined, board: r.board ?? undefined,
       via: r.via ?? [], firstSeenAt: r.first_seen_at, compChecked: !!r.comp_checked,
       forProfile: r.for_profile ?? undefined, lastSeenAt: r.last_seen_at,
+      stage: r.stage ?? undefined, industries: r.industries ?? [],
     }));
   }
 

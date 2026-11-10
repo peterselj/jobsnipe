@@ -1,4 +1,5 @@
 import { linkOwner, parseBoardUrl } from "../../../shared/ats.js";
+import { discoverSkip } from "../../../shared/criteria.js";
 import { HttpError } from "../ats/http.js";
 import { fetchers } from "../ats/index.js";
 import { greenhouseDetails } from "../ats/greenhouse.js";
@@ -248,6 +249,8 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
             // An emailed job at a company on your list you can't check directly is one for your Inbox.
             const inbox = !!j.forProfile && unmonitored.has(companyKey(j.company));
             if (!inbox && onList(j, boards, names)) return [];
+            // Discover-only filters: industries and company stages this person chose to skip.
+            if (!inbox && discoverSkip(person.criteria?.discover, j)) return [];
             const r = evaluate(asPosting(j), f, now);
             if (r.pass && o.handled?.isRepost(person.id, j)) r.flags = [...r.flags, REPOST_FLAG];
             return [{ j, r, onList: inbox }];
