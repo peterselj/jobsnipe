@@ -25,7 +25,7 @@ describe("job-alert emails", () => {
   it("reads LinkedIn alerts: title, company, place, and a clean link", () => {
     const jobs = jobsFromEmail(email({ from_name: "LinkedIn Job Alerts", from_address: "jobalerts-noreply@linkedin.com", html: LINKEDIN }));
     expect(jobs.map((j) => [j.title, j.company, j.locations, j.url, j.via])).toEqual([
-      ["Senior Product Manager, Payments", "Northwind", ["New York, NY (Hybrid)", "Actively recruiting"], "https://www.linkedin.com/jobs/view/4012345678/", ["LinkedIn alert"]],
+      ["Senior Product Manager, Payments", "Northwind", ["New York, NY (Hybrid)"], "https://www.linkedin.com/jobs/view/4012345678/", ["LinkedIn alert"]],
       ["Staff Product Manager", "Brightpath", ["Toronto, ON (Remote)"], "https://www.linkedin.com/jobs/view/4087654321/", ["LinkedIn alert"]],
     ]);
     expect(jobs[1].workplace).toBe("remote");
@@ -39,12 +39,41 @@ describe("job-alert emails", () => {
     ]);
   });
 
-  it("reads plain-text emails, and links straight to company job boards", () => {
-    const jobs = jobsFromEmail(email({ from_name: "Sequoia Capital Jobs", from_address: "jobs@consider.com", text_body: "Product Lead, Growth\nhttps://jobs.ashbyhq.com/acme/0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e\nAcme · New York" }));
-    // In plain text the link's own text is the address, so it can't be a title: nothing is guessed.
-    expect(jobs).toEqual([]);
+  it("reads LinkedIn's layout where one link wraps the whole job, and a logo link comes first", () => {
+    const one = (id: number, title: string, company: string, place: string) => `
+      <tr><td><a href="https://www.linkedin.com/comm/jobs/view/${id}/?trk=eml"><img src="logo.png" alt="${company}"></a></td>
+      <td><a href="https://www.linkedin.com/comm/jobs/view/${id}/?trk=eml" style="text-decoration:none">
+        <table><tr><td><p style="font-weight:700">${title}</p><p>${company} &middot; ${place}</p><p>Actively recruiting</p></td></tr></table>
+      </a></td></tr>`;
+    const jobs = jobsFromEmail(email({ from_address: "jobalerts-noreply@linkedin.com", html: `<table>${one(11, "Group Product Manager", "Tidewater", "Toronto, ON")}${one(12, "Director of Product", "Lumen Health", "New York, NY (On-site)")}</table>` }));
+    expect(jobs.map((j) => [j.title, j.company, j.locations])).toEqual([
+      ["Group Product Manager", "Tidewater", ["Toronto, ON"]],
+      ["Director of Product", "Lumen Health", ["New York, NY (On-site)"]],
+    ]);
+  });
+
+  it("reads plain-text alerts, and links straight to company job boards", () => {
+    const text = [
+      "Your job alert for senior product manager",
+      "",
+      "Senior Product Manager, Payments\nNorthwind\nNew York, NY\nView job: https://www.linkedin.com/comm/jobs/view/4012345678/?trackingId=abc",
+      "",
+      "Product Lead, Growth\nhttps://jobs.ashbyhq.com/acme/0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e\nAcme · New York",
+      "",
+      "See all jobs: https://www.linkedin.com/comm/jobs/search/?keywords=pm",
+    ].join("\n");
+    const jobs = jobsFromEmail(email({ from_address: "jobalerts-noreply@linkedin.com", text_body: text }));
+    expect(jobs.map((j) => [j.title, j.company, j.locations, j.url])).toEqual([
+      ["Senior Product Manager, Payments", "Northwind", ["New York, NY"], "https://www.linkedin.com/jobs/view/4012345678/"],
+      ["Product Lead, Growth", "Acme", ["New York"], "https://jobs.ashbyhq.com/acme/0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e"],
+    ]);
     const html = jobsFromEmail(email({ from_name: "Sequoia Capital Jobs", html: `<a href="https://jobs.ashbyhq.com/acme/0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e">Product Lead, Growth</a><br>Acme · New York` }));
     expect(html.map((j) => [j.title, j.company, j.ats, j.board, j.via])).toEqual([["Product Lead, Growth", "Acme", "ashby", "acme", ["Sequoia Capital Jobs alert"]]]);
+  });
+
+  it("never takes a link that isn't a web address", () => {
+    const jobs = jobsFromEmail(email({ html: `<a href="javascript:alert(1)//www.linkedin.com/jobs/view/123/">Senior Product Manager</a><br>Evil Co · New York` }));
+    expect(jobs).toEqual([]);
   });
 
   it("labels where alerts came from and drops tracking from links", () => {

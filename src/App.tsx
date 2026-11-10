@@ -1,10 +1,12 @@
 import type { Session } from '@supabase/supabase-js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import AddRole from './components/AddRole';
 import Companies from './components/Companies';
 import Matches from './components/Matches';
 import Settings from './components/Settings';
 import SignIn from './components/SignIn';
 import { Button, Mark } from './components/ui';
+import { capturePendingAdd, manualId, takePendingAdd, type RoleDraft } from './lib/addRole';
 import { DemoSource } from './lib/demo';
 import { ago } from '../shared/format';
 import { SupabaseSource, type DataSource } from './lib/source';
@@ -13,6 +15,9 @@ import type { Match, NewWatch, Snapshot, Verdict } from './lib/types';
 
 const POLL_MS = 5000;
 const CHECK_TIMEOUT_MS = 6 * 60_000;
+
+// A role arriving from the "Save to JobSnipe" bookmark (?add=…) is remembered across sign-in.
+capturePendingAdd();
 
 export default function App() {
   const [demo, setDemo] = useState(() => new URLSearchParams(location.search).has('demo'));
@@ -61,6 +66,8 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
   const [notice, setNotice] = useState<string | null>(null);
   const [check, setCheck] = useState<Check>({ state: 'idle' });
   const [, tick] = useState(0);
+  // The Add a role dialog: closed, open blank, or open with a role from the bookmark.
+  const [adding, setAdding] = useState<RoleDraft | true | null>(() => takePendingAdd() ?? null);
 
   const reload = useCallback(async () => setSnap(await source.load()), [source]);
   const fail = (e: unknown) => setError(e instanceof Error ? e.message : String(e));
@@ -185,6 +192,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             <Button variant={stale ? 'primary' : 'secondary'} onClick={() => runCheck()} disabled={check.state === 'running'}>
               {check.state === 'running' ? <CheckingLabel since={check.since} /> : '↻ Check now'}
             </Button>
+            <Button variant="ghost" onClick={() => setAdding(true)} title="Add a job you found yourself, on LinkedIn or anywhere">＋ Add role</Button>
             <Button variant="ghost" onClick={() => setView(view === 'settings' ? 'matches' : 'settings')}>
               {view === 'settings' ? '← Matches' : 'Settings'}
             </Button>
@@ -224,6 +232,22 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
           </p>
         )}
       </div>
+
+      {adding && (
+        <AddRole
+          initial={adding === true ? undefined : adding}
+          onClose={() => setAdding(null)}
+          onAdd={async (role) => {
+            const id = manualId(role.url);
+            const at = new Date().toISOString();
+            await source.setVerdict({ id, ...role }, { verdict: 'interested', at, ...role });
+            await reload();
+            setAdding(null);
+            setView('matches');
+            flash(`Added ${role.title} at ${role.company} to ★ Interested.`);
+          }}
+        />
+      )}
 
       {view === 'settings' ? (
         <main className="px-4 py-6">

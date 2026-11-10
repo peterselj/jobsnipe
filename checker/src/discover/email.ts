@@ -75,9 +75,12 @@ export function cleanJobUrl(href: string): string {
   }
 }
 
+const BREAK = /<br\s*\/?>|<\/(p|div|tr|td|li|h[1-6]|table|span)>/gi;
+
 /**
  * Lines of text, with each link marked as \u0001index\u0002text\u0003 so a link's text and the lines
- * after it can be read together.
+ * after it can be read together. Some alerts (LinkedIn's) wrap a whole job in one link: title, company
+ * and place on separate lines inside it. Then the first line is the link's text and the rest follow it.
  */
 function lines(html: string): { lines: string[]; hrefs: string[] } {
   const hrefs: string[] = [];
@@ -85,10 +88,15 @@ function lines(html: string): { lines: string[]; hrefs: string[] } {
     .replace(/<(script|style|head)[\s\S]*?<\/\1>/gi, " ")
     .replace(/<a\b[^>]*?href\s*=\s*("([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi, (_m, _q, h1, h2, inner) => {
       hrefs.push(decode(h1 ?? h2 ?? ""));
-      const text = inner.replace(/<[^>]+>/g, " ");
-      return `\u0001${hrefs.length - 1}\u0002${text}\u0003`;
+      const inside = inner
+        .replace(BREAK, "\n")
+        .replace(/<[^>]+>/g, " ")
+        .split("\n")
+        .map((l: string) => l.replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+      return `\u0001${hrefs.length - 1}\u0002${inside[0] ?? ""}\u0003${inside.slice(1).map((l: string) => `\n${l}`).join("")}\n`;
     })
-    .replace(/<br\s*\/?>|<\/(p|div|tr|td|li|h[1-6]|table|span)>/gi, "\n")
+    .replace(BREAK, "\n")
     .replace(/<[^>]+>/g, " ");
   return {
     hrefs,
@@ -102,17 +110,63 @@ function lines(html: string): { lines: string[]; hrefs: string[] } {
 const LINK = /\u0001(\d+)\u0002([^\u0003]*)\u0003/g;
 const plain = (line: string) => line.replace(LINK, (_m, _i, t) => t).replace(/\s+/g, " ").trim();
 const SEP = /\s*(?:·|•|\||–| - )\s*/;
+// Badges and status lines that sit beside a job ("New", "Actively recruiting", "3 days ago").
+const NOT_A_COMPANY = /^(new|promoted|viewed|applied)$|^(actively |posted |easy apply|be an early|\d+ (applicants?|days?|hours?|weeks?|school|connections?))/i;
+const titleLike = (t: string) => t.length >= 4 && t.length <= 140 && !NOT_A_TITLE.test(t) && !/^https?:/i.test(t);
+
+/** One job, from its title, the bits of text that came with it (company first, then places) and its link. */
+function job(e: InboundEmail, label: string, title: string, after: string[], href: string): DiscoverJob {
+  const parts = after.flatMap((a) => a.split(SEP)).map((s) => s.trim()).filter((s) => s && !NOT_A_COMPANY.test(s));
+  const url = cleanJobUrl(href);
+  const board = parseBoardUrl(url);
+  return {
+    id: `e:${createHash("sha1").update(`${e.profile_id}|${url}`).digest("hex").slice(0, 16)}`,
+    company: parts[0] ?? board?.board ?? "Unknown company",
+    title,
+    // Everything after the company is a candidate place; the filters look for your places in it.
+    locations: parts.slice(1, 4),
+    workplace: parts.some((p) => /\bremote\b/i.test(p)) ? "remote" : parts.some((p) => /\bhybrid\b/i.test(p)) ? "hybrid" : undefined,
+    url,
+    postedAt: e.received_at,
+    ats: board?.ats,
+    board: board?.board,
+    via: [label],
+    forProfile: e.profile_id,
+  };
+}
+
+/**
+ * Plain-text alerts: each job is a few lines together with its link among them, e.g.
+ * "Senior Product Manager / Acme / New York, NY / View job: https://…". The first line that isn't
+ * the link is the title; the rest are the company and place.
+ */
+function jobsFromText(e: InboundEmail, label: string): DiscoverJob[] {
+  const out: DiscoverJob[] = [];
+  for (const block of (e.text_body ?? "").split(/\n\s*\n|\n[-=_*]{3,}\s*\n/)) {
+    const ls = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    const href = ls.flatMap((l) => l.match(/https?:\/\/\S+/g) ?? []).map((u) => u.replace(/[)>.,]+$/, "")).find(isJobLink);
+    if (!href) continue;
+    const words = ls.map((l) => l.replace(/https?:\/\/\S+/g, "").replace(/^(view|see|apply)[^:]*:\s*$/i, "").trim()).filter(Boolean);
+    if (!words.length || !titleLike(words[0])) continue;
+    out.push(job(e, label, words[0], words.slice(1, 4), href));
+  }
+  return out;
+}
 
 /** Jobs in one email. Only links to a single job count; each needs a title-like link text. */
 export function jobsFromEmail(e: InboundEmail): DiscoverJob[] {
   const label = sourceLabel(e);
-  const { lines: ls, hrefs } = lines(e.html || (e.text_body ?? "").replace(/(https?:\/\/\S+)/g, '<a href="$1">$1</a>').replace(/\n/g, "<br>"));
   const found = new Map<string, DiscoverJob>();
+  if (!e.html?.trim()) {
+    for (const j of jobsFromText(e, label)) if (!found.has(j.id)) found.set(j.id, j);
+    return [...found.values()];
+  }
+  const { lines: ls, hrefs } = lines(e.html);
   ls.forEach((line, i) => {
     for (const m of line.matchAll(LINK)) {
       const href = hrefs[Number(m[1])];
       const title = m[2].replace(/\s+/g, " ").trim();
-      if (!href || !isJobLink(href) || title.length < 4 || title.length > 140 || NOT_A_TITLE.test(title) || /^https?:/i.test(title)) continue;
+      if (!href || !isJobLink(href) || !titleLike(title)) continue;
       // The company and place follow the title, on the same line or the next ones (until the next job).
       const rest = plain(line.replace(m[0], "")).replace(/^[·•|–-]\s*/, "");
       const after: string[] = rest ? [rest] : [];
@@ -126,26 +180,8 @@ export function jobsFromEmail(e: InboundEmail): DiscoverJob[] {
         const p = plain(next);
         if (p && p.length <= 120) after.push(p);
       }
-      const parts = after.flatMap((a) => a.split(SEP)).map((s) => s.trim()).filter(Boolean);
-      const url = cleanJobUrl(href);
-      const board = parseBoardUrl(url);
-      const company = parts[0] && !/^(new|actively|promoted|posted|\d+ (applicants|days?|hours?))/i.test(parts[0]) ? parts[0] : board?.board ?? "Unknown company";
-      const id = `e:${createHash("sha1").update(`${e.profile_id}|${url}`).digest("hex").slice(0, 16)}`;
-      if (found.has(id)) continue;
-      found.set(id, {
-        id,
-        company,
-        title,
-        // Everything after the company is a candidate place; the filters look for your places in it.
-        locations: parts.slice(1, 4),
-        workplace: parts.some((p) => /\bremote\b/i.test(p)) ? "remote" : parts.some((p) => /\bhybrid\b/i.test(p)) ? "hybrid" : undefined,
-        url,
-        postedAt: e.received_at,
-        ats: board?.ats,
-        board: board?.board,
-        via: [label],
-        forProfile: e.profile_id,
-      });
+      const made = job(e, label, title, after, href);
+      if (!found.has(made.id)) found.set(made.id, made);
     }
   });
   return [...found.values()];

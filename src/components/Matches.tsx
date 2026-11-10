@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { linkOwner } from '../../shared/ats';
 import { safeHttpUrl } from '../../shared/url';
 import { ago, money } from '../../shared/format';
+import { isManual } from '../lib/addRole';
 import type { DigestEvery, DiscoverSource, Feedback, Match, NewWatch, Verdict } from '../lib/types';
 import FindBoard from './FindBoard';
 import { Button } from './ui';
@@ -348,7 +349,10 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
   const status = archived
     ? verdict?.verdict === 'interested' ? '★ Was Interested' : verdict?.verdict === 'not_for_me' ? 'Was Not for me' : 'Archived from inbox'
     : undefined;
-  const facts = m.closed
+  const manual = isManual(m.id);
+  const facts = manual
+    ? [`Added by you${verdict ? ` ${ago(verdict.at)}` : ''}`]
+    : m.closed
     ? ['Posting closed or no longer matches']
     : [m.where, m.comp && money(m.comp), m.atsPostedAt && `posted ${ago(m.atsPostedAt)}`].filter(Boolean);
 
@@ -360,7 +364,7 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
 
   return (
     <article
-      className={`rounded-xl border bg-white px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,.02)] ${interested ? 'border-forest-2 ring-1 ring-forest-2/30' : 'border-line'} ${m.closed || archived ? 'opacity-75' : ''}`}
+      className={`rounded-xl border bg-white px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,.02)] ${interested ? 'border-forest-2 ring-1 ring-forest-2/30' : 'border-line'} ${(m.closed && !manual) || archived ? 'opacity-75' : ''}`}
       style={isNew ? { borderLeft: '3px solid var(--color-forest-2)' } : undefined}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -402,7 +406,7 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           ) : verdict ? (
             <>
               <Button size="sm" onClick={archive} title="Done with this role: move it to the Archive">Archive →</Button>
-              <Button size="sm" variant="ghost" onClick={() => onVerdict(m, null)}>↩ Back to inbox</Button>
+              <Button size="sm" variant="ghost" onClick={() => onVerdict(m, null)}>{manual ? 'Remove' : '↩ Back to inbox'}</Button>
             </>
           ) : (
             !asking && (
