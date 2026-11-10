@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { linkOwner } from '../../shared/ats';
+import { safeHttpUrl } from '../../shared/url';
 import { ago, money } from '../../shared/format';
+import { isManual } from '../lib/addRole';
+import { postingDescription, postingForResume, resumeMachineLink } from '../lib/posting';
 import type { DigestEvery, DiscoverSource, Feedback, Match, NewWatch, Verdict } from '../lib/types';
 import FindBoard from './FindBoard';
 import { Button } from './ui';
@@ -31,10 +34,13 @@ const DAY = 86_400_000;
 
 const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+const JOB_SITES = new Set(['linkedin', 'indeed', 'wellfound', 'angel', 'glassdoor', 'ziprecruiter']);
+
 /** When a VC board files a job under one company but its link goes to another (e.g. one that bought it). */
 function linksElsewhere(m: Match): string | undefined {
   const owner = m.url ? linkOwner(m.url) : undefined;
-  if (!owner) return undefined;
+  // Job sites (where alert emails link) aren't the employer, so a mismatch there means nothing.
+  if (!owner || JOB_SITES.has(owner)) return undefined;
   const a = squash(owner);
   const b = squash(m.company);
   return a && b && !a.includes(b) && !b.includes(a) ? owner : undefined;
@@ -69,11 +75,13 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
   const [showOlder, setShowOlder] = useState(false);
   const open = new Map(matches.map((m) => [m.id, m]));
 
-  const inbox = matches.filter((m) => !m.nearMiss && !m.via && !feedback[m.id]);
+  // Inbox: new matches on your list, including roles from your job-alert emails at companies on your
+  // list that JobSnipe can't check directly.
+  const inbox = matches.filter((m) => !m.nearMiss && (!m.via || m.onList) && !feedback[m.id]);
   // Near misses: right job family, missed by one filter. Marking one Interested moves it to Interested.
   const near = matches.filter((m) => m.nearMiss && !feedback[m.id]);
   // Discover: the opposite of a near miss. Every filter passes, but the company isn't on your list.
-  const discover = matches.filter((m) => m.via && !feedback[m.id]);
+  const discover = matches.filter((m) => m.via && !m.onList && !feedback[m.id]);
   const viaCounts = new Map<string, number>();
   for (const m of discover) for (const v of m.via!) viaCounts.set(v, (viaCounts.get(v) ?? 0) + 1);
   const missCounts = near.reduce<Partial<Record<MissCheck, number>>>((acc, m) => ({ ...acc, [m.nearMiss!]: (acc[m.nearMiss!] ?? 0) + 1 }), {});
@@ -231,7 +239,8 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
         <div className="mb-3 rounded-xl border border-line bg-white px-4 py-3">
           <p className="text-sm text-ink-soft">
             Roles that pass <b>all</b> your filters at companies you don't watch, from VC portfolio job boards
-            {discoverSources.length ? ` (${discoverSources.map((s) => s.name).join(', ')})` : ''}. Checked every 4 hours and sent as{' '}
+            {discoverSources.length ? ` (${discoverSources.map((s) => s.name).join(', ')})` : ''}
+            {discover.some((m) => m.via!.some((v) => v.endsWith(' alert'))) ? ' and your job-alert emails' : ''}. Checked every 4 hours and sent as{' '}
             {DIGEST_LABEL[digestEvery]} digest email (
             {onOpenSettings ? <button className="font-semibold text-forest underline-offset-2 hover:underline" onClick={onOpenSettings}>change</button> : 'change in Settings'}
             ). Like a company? <b>Watch it</b> to hear about its new roles within the hour.
@@ -315,6 +324,22 @@ function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needs
 function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: boolean }; verdict?: Verdict; onVerdict: Props['onVerdict']; onWatch: Props['onWatch'] }) {
   const [asking, setAsking] = useState(false);
   const [finding, setFinding] = useState(false);
+  // Tailor resume: the posting's text (when its board can be read) and whether it reached the clipboard.
+  const [tailor, setTailor] = useState<null | 'reading' | { text?: string; copied: boolean }>(null);
+  const copyPosting = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return false; // some browsers only allow copying straight from a click; the Copy button covers that
+    }
+  };
+  const startTailor = async () => {
+    setTailor('reading');
+    const description = await postingDescription(m);
+    const text = description ? postingForResume(m, description) : undefined;
+    setTailor({ text, copied: text ? await copyPosting(text) : false });
+  };
   const [watching, setWatching] = useState(false);
   // Watch: straight away when we know the company's board, otherwise look for it first.
   const watch = async () => {
@@ -341,7 +366,10 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
   const status = archived
     ? verdict?.verdict === 'interested' ? '★ Was Interested' : verdict?.verdict === 'not_for_me' ? 'Was Not for me' : 'Archived from inbox'
     : undefined;
-  const facts = m.closed
+  const manual = isManual(m.id);
+  const facts = manual
+    ? [`Added by you${verdict ? ` ${ago(verdict.at)}` : ''}`]
+    : m.closed
     ? ['Posting closed or no longer matches']
     : [m.where, m.comp && money(m.comp), m.atsPostedAt && `posted ${ago(m.atsPostedAt)}`].filter(Boolean);
 
@@ -353,7 +381,7 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
 
   return (
     <article
-      className={`rounded-xl border bg-white px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,.02)] ${interested ? 'border-forest-2 ring-1 ring-forest-2/30' : 'border-line'} ${m.closed || archived ? 'opacity-75' : ''}`}
+      className={`rounded-xl border bg-white px-4 py-3 shadow-[0_1px_0_rgba(0,0,0,.02)] ${interested ? 'border-forest-2 ring-1 ring-forest-2/30' : 'border-line'} ${(m.closed && !manual) || archived ? 'opacity-75' : ''}`}
       style={isNew ? { borderLeft: '3px solid var(--color-forest-2)' } : undefined}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -363,8 +391,8 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
             {isNew && <span className="rounded bg-emerald-100 px-1.5 py-px text-[9.5px] text-forest">New</span>}
             {status && <span className="rounded bg-slate-100 px-1.5 py-px text-[9.5px] normal-case tracking-normal text-ink-soft">{status}</span>}
           </div>
-          {m.url ? (
-            <a href={m.url} target="_blank" rel="noreferrer" className="mt-0.5 block text-[16px] font-bold leading-snug text-forest-2 hover:underline">
+          {safeHttpUrl(m.url) ? (
+            <a href={safeHttpUrl(m.url)} target="_blank" rel="noreferrer" className="mt-0.5 block text-[16px] font-bold leading-snug text-forest-2 hover:underline">
               {m.title}
             </a>
           ) : (
@@ -379,7 +407,7 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           {m.flags.length > 0 && <div className="mt-1 text-[13px] text-gold">⚑ {m.flags.join(' · ')}</div>}
           {m.via && !verdict && (
             <div className="mt-1 text-[12px] text-muted">
-              via {m.via.join(', ')} · not on your list
+              via {m.via.join(', ')}{m.onList ? '' : ' · not on your list'}
               {linksElsewhere(m) && <> · <span className="text-gold">links to {linksElsewhere(m)}</span></>}
             </div>
           )}
@@ -395,7 +423,12 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           ) : verdict ? (
             <>
               <Button size="sm" onClick={archive} title="Done with this role: move it to the Archive">Archive →</Button>
-              <Button size="sm" variant="ghost" onClick={() => onVerdict(m, null)}>↩ Back to inbox</Button>
+              {interested && !tailor && (
+                <Button size="sm" variant="ghost" onClick={startTailor} title="Tailor your resume to this role with ResumeMachine, in your own AI assistant">
+                  Tailor resume
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => onVerdict(m, null)}>{manual ? 'Remove' : '↩ Back to inbox'}</Button>
             </>
           ) : (
             !asking && (
@@ -403,7 +436,7 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
                 <Button size="sm" onClick={() => decide('interested')}>{m.nearMiss ? '★ Interested anyway' : '★ Interested'}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setAsking(true)}>Not for me</Button>
                 <Button size="sm" variant="ghost" onClick={archive} title="Not worth deciding (e.g. stale): archive it so it never comes back">Archive</Button>
-                {m.via && (
+                {m.via && !m.onList && (
                   <Button size="sm" variant="ghost" onClick={watch} disabled={watching} title="Add this company to your list: its new roles are checked hourly and emailed">
                     {watching ? 'Adding…' : '+ Watch company'}
                   </Button>
@@ -413,6 +446,38 @@ function MatchCard({ m, verdict, onVerdict, onWatch }: { m: Match & { closed?: b
           )}
         </div>
       </div>
+
+      {tailor && (
+        <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3 text-sm sm:flex-row sm:items-center">
+          {tailor === 'reading' ? (
+            <span className="text-muted">Reading the posting…</span>
+          ) : (
+            <>
+              <span className="min-w-0 flex-1 text-ink-soft">
+                {tailor.copied
+                  ? '✓ The posting is on your clipboard. Paste it into your ResumeMachine chat.'
+                  : tailor.text
+                  ? 'The posting is ready to copy.'
+                  : "This site's posting can't be read from here. Open the job, copy its text, and paste it into your ResumeMachine chat."}
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {tailor.text && !tailor.copied && (
+                  <Button size="sm" onClick={async () => setTailor({ text: tailor.text, copied: await copyPosting(tailor.text!) })}>Copy posting</Button>
+                )}
+                <a
+                  href={resumeMachineLink(m, tailor.copied)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-md bg-forest px-2.5 py-1 text-[13px] font-semibold text-white hover:bg-forest-deep"
+                >
+                  Open ResumeMachine →
+                </a>
+                <Button size="sm" variant="ghost" onClick={() => setTailor(null)}>Close</Button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {finding && (
         <FindBoard

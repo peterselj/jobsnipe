@@ -1,0 +1,45 @@
+name: Set up job-alert inbox
+
+# Run once by hand (Actions → Set up job-alert inbox → Run workflow) after the DNS and the Supabase
+# function are in place (docs/SETUP.md, "Job-alert inbox"). Tells Brevo to hand every email sent to
+# the alerts subdomain to the "inbound-email" Supabase function. Brevo only offers this through its API.
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: The alerts subdomain (its MX records point at Brevo)
+        default: alerts.joshpetersel.com
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create Brevo's inbound webhook
+        env:
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          DOMAIN: ${{ inputs.domain }}
+          SUPABASE_URL: https://hzeciyeirloyzqkjvvln.supabase.co
+        run: |
+          # The webhook address carries a key the database made (0011_email_inbox.sql), so only Brevo
+          # can file mail. It's read here with the secret key and never printed.
+          key=$(curl -sS -X POST "$SUPABASE_URL/rest/v1/rpc/inbox_webhook_key" \
+            -H "apikey: $SUPABASE_SECRET_KEY" -H "Authorization: Bearer $SUPABASE_SECRET_KEY" -H 'content-type: application/json' -d '{}' | jq -r 'if type == "string" then . else empty end')
+          if [ -z "$key" ]; then echo "::error::Couldn't read the inbox key. Has 0011_email_inbox.sql been run?"; exit 1; fi
+          echo "::add-mask::$key"
+          URL="$SUPABASE_URL/functions/v1/inbound-email?key=$key"
+          body=$(jq -n --arg url "$URL" --arg domain "$DOMAIN" \
+            '{type: "inbound", events: ["inboundEmailProcessed"], url: $url, domain: $domain, description: "JobSnipe job-alert inbox"}')
+          status=$(curl -sS -o response.json -w '%{http_code}' -X POST https://api.brevo.com/v3/webhooks \
+            -H "api-key: $BREVO_API_KEY" -H 'content-type: application/json' -H 'accept: application/json' -d "$body")
+          echo "Brevo answered $status"
+          # The response has only the new webhook's id (or an error message), nothing secret.
+          cat response.json; echo
+          if [ "$status" -ge 300 ]; then
+            echo "::error::Brevo refused. If it says the key isn't allowed, the API key needs webhook access (see docs/SETUP.md)."
+            exit 1
+          fi

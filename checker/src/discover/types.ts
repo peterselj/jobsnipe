@@ -18,6 +18,9 @@ export interface DiscoverJob {
   via: string[];
   /** Pay has been looked up on the company's own board (whether or not it had any). */
   compChecked?: boolean;
+  /** Found in this person's job-alert emails: theirs alone. Unset for jobs found on VC boards. */
+  forProfile?: string;
+  lastSeenAt?: string;
   firstSeenAt?: string;
 }
 

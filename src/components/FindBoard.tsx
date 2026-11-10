@@ -1,7 +1,14 @@
 import { useState } from 'react';
+import { safeHttpUrl } from '../../shared/url';
 import { ATS_LABEL, boardLabel, boardUrl, companyFromSiteUrl, findBoards, looksLikeUrl, parseBoardUrl, type BoardHit } from '../lib/ats';
 import type { NewWatch } from '../lib/types';
 import { Button, Field, Input, Modal } from './ui';
+
+/** A typed careers link as a web address ("acme.com/careers" gets https://), or none if it isn't one. */
+const careersLink = (typed: string) => {
+  const t = typed.trim();
+  return t ? safeHttpUrl(/^[a-z][a-z0-9+.-]*:/i.test(t) ? t : `https://${t}`) : undefined;
+};
 
 /** "major-league-baseball" -> "Major League Baseball". */
 export const prettyBoard = (board: string) => board.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
@@ -112,7 +119,7 @@ export default function FindBoard({ title, initialName, allowUnmonitored = true,
                 <Field label="Careers page (optional)">
                   <Input value={careersUrl} onChange={(e) => setCareersUrl(e.target.value)} placeholder="https://…" />
                 </Field>
-                <Button disabled={saving} onClick={() => pick({ name, ats: 'none', careers_url: careersUrl.trim() || undefined, note: 'job board not found yet' })}>
+                <Button disabled={saving} onClick={() => pick({ name, ats: 'none', careers_url: careersLink(careersUrl), note: 'job board not found yet' })}>
                   Add as not monitored
                 </Button>
                 </>)}

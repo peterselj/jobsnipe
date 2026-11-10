@@ -73,3 +73,52 @@ describe('finding boards', () => {
     ]);
   });
 });
+
+describe('adding a role by hand', () => {
+  it('reads the role from a job page title, however the site words it', async () => {
+    const { roleFromPage } = await import('../src/lib/addRole');
+    const li = 'https://www.linkedin.com/jobs/view/4012345678/?trackingId=abc';
+    expect(roleFromPage(li, '(3) Senior Product Manager | Acme Robotics | LinkedIn')).toEqual({ url: 'https://www.linkedin.com/jobs/view/4012345678/', title: 'Senior Product Manager', company: 'Acme Robotics' });
+    expect(roleFromPage(li, 'Acme hiring Senior Product Manager in New York, NY | LinkedIn')).toMatchObject({ title: 'Senior Product Manager', company: 'Acme' });
+    expect(roleFromPage('https://www.linkedin.com/jobs/search/?currentJobId=77&keywords=pm', 'Staff PM | Beta | LinkedIn').url).toBe('https://www.linkedin.com/jobs/view/77/');
+    expect(roleFromPage('https://job-boards.greenhouse.io/acme/jobs/123', 'Job Application for Senior PM at Acme')).toMatchObject({ title: 'Senior PM', company: 'Acme' });
+    expect(roleFromPage('https://jobs.lever.co/acme/0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e', 'Acme - Senior PM, Growth')).toMatchObject({ title: 'Senior PM, Growth', company: 'Acme' });
+    expect(roleFromPage('https://jobs.ashbyhq.com/acme/x', 'Senior PM @ Acme')).toMatchObject({ title: 'Senior PM', company: 'Acme' });
+    expect(roleFromPage('https://www.indeed.com/viewjob?jk=1', 'Senior PM - Acme - New York, NY - Indeed.com')).toMatchObject({ title: 'Senior PM', company: 'Acme' });
+    expect(roleFromPage('https://careers.example.com/jobs/9?utm_source=x', 'Head of Product')).toEqual({ url: 'https://careers.example.com/jobs/9', title: 'Head of Product', company: 'Example' });
+  });
+
+  it('gives the same job the same id, and refuses links that are not web addresses', async () => {
+    const { cleanRoleUrl, manualId } = await import('../src/lib/addRole');
+    expect(manualId('https://www.linkedin.com/jobs/view/42/?trk=a')).toBe(manualId('https://www.linkedin.com/comm/jobs/view/senior-pm-at-acme-42?refId=b'));
+    expect(manualId('https://www.linkedin.com/jobs/view/42/')).not.toBe(manualId('https://www.linkedin.com/jobs/view/43/'));
+    expect(cleanRoleUrl('javascript:alert(1)')).toBeUndefined();
+  });
+
+  it('fills in Greenhouse and Lever roles from their public APIs, and asks LinkedIn nothing', async () => {
+    const { lookUpRole } = await import('../src/lib/addRole');
+    const asked: string[] = [];
+    const fake = (async (url: string) => {
+      asked.push(url);
+      return Response.json(url.includes('greenhouse') ? { title: 'Senior PM', company_name: 'Acme Inc' } : { text: 'Lead PM' });
+    }) as unknown as typeof fetch;
+    expect(await lookUpRole('https://boards.greenhouse.io/acme/jobs/123?gh_src=x', fake)).toEqual({ title: 'Senior PM', company: 'Acme Inc' });
+    expect(await lookUpRole('https://jobs.lever.co/acme/0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e', fake)).toEqual({ title: 'Lead PM', company: 'Acme' });
+    expect(await lookUpRole('https://www.linkedin.com/jobs/view/42/', fake)).toBeUndefined();
+    expect(asked).toEqual(['https://boards-api.greenhouse.io/v1/boards/acme/jobs/123', 'https://api.lever.co/v0/postings/acme/0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e']);
+  });
+
+  it('safeHttpUrl keeps web links and drops the rest', async () => {
+    const { safeHttpUrl } = await import('../shared/url');
+    expect(safeHttpUrl('https://x.example/a?b=1')).toBe('https://x.example/a?b=1');
+    for (const bad of ['javascript:alert(1)', 'data:text/html,x', 'JAVASCRIPT:alert(1)', ' vbscript:x', 'not a link', '', null, undefined]) expect(safeHttpUrl(bad)).toBeUndefined();
+  });
+});
+
+describe('title entries that are too broad', () => {
+  it('flags a level word by itself, and nothing else', async () => {
+    const { tooBroadTitles } = await import('../shared/criteria');
+    expect(tooBroadTitles(['product manager', 'Director', 'director of product', ' lead ', 'head of product', 'designer'])).toEqual(['director', 'lead']);
+    expect(tooBroadTitles(undefined)).toEqual([]);
+  });
+});

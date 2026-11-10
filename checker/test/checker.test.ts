@@ -358,6 +358,28 @@ describe("paused alerts", () => {
   });
 });
 
+describe("reposts", () => {
+  it("a role you already handled, re-listed under a new id, is flagged and not emailed again", async () => {
+    const { store, sent, mailer } = setup();
+    let board = [job("1")];
+    const fetch = async () => ({ postings: board });
+    await runCheck({ store, mailer, fetch, now: at(1) });
+    // Josh passes on it (the page saves the company and title with the decision); Acme then takes it
+    // down and re-lists it as job 2, next to a genuinely new job 3.
+    store.verdicts.push({ profile_id: JOSH, posting_id: "greenhouse:acme:1", company: "Acme", title: "Senior Product Manager" });
+    board = [job("2"), job("3", "Senior Product Manager, Growth")];
+    await runCheck({ store, mailer, fetch, now: at(2) });
+
+    expect(sent.filter((e) => e.subject.startsWith("New match")).map((e) => e.subject)).toEqual(["New match: Senior Product Manager, Growth at Acme (NYC area)"]);
+    const rows = store.matches.get(JOSH)!;
+    expect(rows.find((m) => m.posting_id === "greenhouse:acme:2")!.flags).toContain("looks like a repost of a role you already handled");
+    expect(rows.find((m) => m.posting_id === "greenhouse:acme:3")!.flags).not.toContain("looks like a repost of a role you already handled");
+    // Not retried next hour either.
+    await runCheck({ store, mailer, fetch, now: at(3) });
+    expect(sent.filter((e) => e.subject.startsWith("New match"))).toHaveLength(1);
+  });
+});
+
 describe("age limit", () => {
   it("keeps old postings out of matches and emails, as near misses", async () => {
     const { store, sent, mailer } = setup();
@@ -512,6 +534,34 @@ describe("discover", () => {
     });
     await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(1) });
     expect(store.discoverMatches.get(JOSH)!.map((m) => m.posting_id).sort()).toEqual(["d:11", "d:12"]);
+  });
+
+  it("reads job-alert emails: your unmonitored companies go to your Inbox, the rest to your Discover only", async () => {
+    const { store, sent, mailer } = setup();
+    store.people_[1].criteria = CRITERIA; // Jake searches the same roles, but these emails are Josh's
+    const row = (title: string, company: string, url: string) => `<a href="${url}">${title}</a><br>${company} · New York, NY<br>`;
+    store.emails.push({
+      id: 7, profile_id: JOSH, from_name: "LinkedIn", from_address: "jobalerts-noreply@linkedin.com", subject: "New jobs", text_body: null,
+      received_at: at(1).toISOString(),
+      html:
+        row("Senior Product Manager", "Corner Store", "https://www.linkedin.com/jobs/view/1/") + // on Josh's list, no board JobSnipe reads
+        row("Staff Product Manager", "Elsewhere Inc", "https://www.linkedin.com/jobs/view/2/") + // not on the list
+        row("Senior Product Manager, Ads", "Acme", "https://www.linkedin.com/jobs/view/3/"), // Acme's board is read directly
+    });
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), now: at(1) });
+
+    expect(store.emails[0]).toMatchObject({ jobs_found: 3, processed_at: at(1).toISOString() });
+    const mine = store.discoverMatches.get(JOSH)!;
+    const title = (id: string) => store.discover.get(id)!.title;
+    expect(mine.filter((m) => m.on_list).map((m) => title(m.posting_id))).toEqual(["Senior Product Manager"]);
+    expect(mine.filter((m) => !m.on_list).map((m) => title(m.posting_id))).toEqual(["Staff Product Manager"]);
+    expect(store.discoverMatches.get(JAKE)).toEqual([]);
+    expect(sent.filter((e) => e.subject.startsWith("New match")).map((e) => e.subject)).toEqual(["New match: Senior Product Manager at Corner Store (LinkedIn alert) (NYC area)"]);
+
+    // Next hour: no second email for the same job; it stays in the Inbox.
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), now: at(2) });
+    expect(sent.filter((e) => e.subject.startsWith("New match"))).toHaveLength(1);
+    expect(store.discoverMatches.get(JOSH)!.filter((m) => m.on_list)).toHaveLength(1);
   });
 
   it("a broken board is reported without holding anything up", async () => {

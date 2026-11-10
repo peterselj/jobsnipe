@@ -1,5 +1,6 @@
+import type { InboundEmail } from "../src/discover/email.js";
 import type { DiscoverJob, DiscoverSourceRow } from "../src/discover/types.js";
-import type { CompanyRow, DiscoverMatchRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "../src/store.js";
+import type { CompanyRow, DiscoverMatchRow, HandledRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "../src/store.js";
 import type { Person } from "../src/types.js";
 
 /** In-memory Store for tests; mirrors what SupabaseStore does against the real tables. */
@@ -16,6 +17,7 @@ export class MemoryStore implements Store {
   sources: DiscoverSourceRow[] = [];
   discover = new Map<string, DiscoverJob & { lastSeenAt: string }>();
   discoverMatches = new Map<string, DiscoverMatchRow[]>();
+  emails: (InboundEmail & { processed_at?: string; jobs_found?: number })[] = [];
 
   addSource(id: number, name: string) {
     this.sources.push({ id, kind: "getro", host: `jobs.${id}.example`, name, collection_id: null, enabled: true, last_checked_at: null, last_ok_at: null, last_error: null, open_postings: null });
@@ -67,6 +69,10 @@ export class MemoryStore implements Store {
   async alerted() {
     return new Set(this.alerts);
   }
+  verdicts: HandledRow[] = [];
+  async handled() {
+    return this.verdicts;
+  }
   async recordAlerts(rows: { profile_id: string; posting_id: string }[]) {
     for (const r of rows) this.alerts.add(`${r.profile_id}|${r.posting_id}`);
   }
@@ -90,7 +96,13 @@ export class MemoryStore implements Store {
     }
   }
   async openDiscoverPostings(since: string) {
-    return [...this.discover.values()].filter((j) => j.lastSeenAt >= since);
+    return [...this.discover.values()].filter((j) => j.lastSeenAt >= since).map((j) => ({ ...j }));
+  }
+  async unreadEmails() {
+    return this.emails.filter((e) => !e.processed_at);
+  }
+  async markEmailsRead(rows: { id: number; jobs_found: number }[], at: string) {
+    for (const r of rows) Object.assign(this.emails.find((e) => e.id === r.id)!, { processed_at: at, jobs_found: r.jobs_found });
   }
   async syncDiscoverMatches(profileId: string, rows: DiscoverMatchRow[]) {
     this.discoverMatches.set(profileId, rows);

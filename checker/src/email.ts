@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ago, money } from "../../shared/format.js";
+import { safeHttpUrl } from "../../shared/url.js";
 import type { FilterResult, Posting } from "./types.js";
 
 export const SITE = "https://peterselj.github.io/jobsnipe/";
@@ -79,7 +80,7 @@ function card(p: Posting, r: FilterResult, now: Date): string {
     : "";
   return `<div style="background:${C.card};border:1px solid ${C.line};border-radius:10px;padding:14px 16px;margin:0 0 10px">
   <div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:${C.muted}">${esc(p.company)}</div>
-  <a href="${esc(p.url)}" style="display:block;margin:2px 0 4px;font-size:17px;font-weight:700;color:${C.forest};text-decoration:none">${esc(p.title)}</a>
+  <a href="${esc(safeHttpUrl(p.url) ?? SITE)}" style="display:block;margin:2px 0 4px;font-size:17px;font-weight:700;color:${C.forest};text-decoration:none">${esc(p.title)}</a>
   <div style="font-size:14px;color:${C.ink}">${postingFacts(p, r, now).map(esc).join(" · ")}</div>${flags}
 </div>`;
 }

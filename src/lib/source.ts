@@ -13,12 +13,19 @@ export interface DataSource {
   removeWatch(watchId: number): Promise<void>;
   /** null = back to the usual filters for this company. */
   setWatchFilters(watchId: number, filters: WatchFilters | null): Promise<void>;
-  saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused' | 'digest_every'>>): Promise<void>;
+  saveProfile(patch: Partial<Pick<Profile, 'name' | 'criteria' | 'alerts_paused' | 'digest_every'>>): Promise<void>;
   /** Permanently delete the signed-in account and everything about it. */
   deleteAccount(): Promise<void>;
   /** Starts a check; returns the time to wait for a run after. */
   requestCheck(): Promise<string>;
   latestRun(): Promise<Run | undefined>;
+  /**
+   * Ask to move sign-in and alerts to another address. Nothing changes until the confirmation link
+   * emailed to it is clicked, so alerts can only ever go to an address its owner confirmed.
+   */
+  changeEmail(email: string): Promise<void>;
+  /** Turn the job-alert inbox on (a fresh address) or off. Returns the address's first part, or null. */
+  setInbox(on: boolean): Promise<string | null>;
 }
 
 function fail(what: string, error: { message: string } | null): asserts error is null {
@@ -44,8 +51,8 @@ export class SupabaseSource implements DataSource {
   constructor(private db: SupabaseClient, private userId: string) {}
 
   async load(): Promise<Snapshot> {
-    const [profile, watches, matches, verdicts, run, discover, sources] = await Promise.all([
-      this.db.from('profiles').select('id, name, email, criteria, alert_mode, alerts_paused, digest_every').eq('id', this.userId).single(),
+    const [profile, watches, matches, verdicts, run, discover, sources, emails] = await Promise.all([
+      this.db.from('profiles').select('id, name, email, criteria, alert_mode, alerts_paused, digest_every, inbox_token').eq('id', this.userId).single(),
       this.db
         .from('watches')
         .select('id, name, careers_url, note, filters, company_id, companies(ats, board, last_checked_at, last_error, consecutive_failures, open_postings)')
@@ -58,15 +65,17 @@ export class SupabaseSource implements DataSource {
       this.latestRun(),
       this.db
         .from('discover_matches')
-        .select('where_label, flags, discover_postings(id, company, title, url, posted_at, comp_min, comp_max, comp_currency, ats, board, via, first_seen_at)')
+        .select('where_label, flags, on_list, discover_postings(id, company, title, url, posted_at, comp_min, comp_max, comp_currency, ats, board, via, first_seen_at)')
         .limit(2000),
       this.db.from('discover_sources').select('name, host, last_ok_at, last_error, enabled').order('id'),
+      this.db.from('inbound_emails').select('id, from_name, from_address, subject, received_at, jobs_found, text_body').order('received_at', { ascending: false }).limit(10),
     ]);
     fail('Loading your profile', profile.error);
     fail('Loading companies', watches.error);
     fail('Loading matches', matches.error);
     fail('Loading feedback', verdicts.error);
     fail('Loading Discover', discover.error ?? sources.error);
+    fail('Loading your inbox', emails.error);
 
     const nameByCompany = new Map<number, string>();
     const ws: Watch[] = (watches.data ?? []).map((w: any) => {
@@ -122,6 +131,7 @@ export class SupabaseSource implements DataSource {
           atsPostedAt: p.posted_at ?? undefined,
           firstSeenAt: p.first_seen_at,
           via: p.via ?? [],
+          onList: !!m.on_list,
           ats: p.ats ?? undefined,
           board: p.board ?? undefined,
         };
@@ -149,6 +159,15 @@ export class SupabaseSource implements DataSource {
       discoverSources: (sources.data ?? [])
         .filter((s: any) => s.enabled)
         .map((s: any) => ({ name: s.name, host: s.host, lastOkAt: s.last_ok_at ?? undefined, lastError: s.last_error ?? undefined })),
+      inboxEmails: (emails.data ?? []).map((e: any) => ({
+        id: e.id,
+        fromName: e.from_name ?? undefined,
+        fromAddress: e.from_address ?? undefined,
+        subject: e.subject ?? undefined,
+        receivedAt: e.received_at,
+        jobsFound: e.jobs_found ?? undefined,
+        text: e.text_body ?? undefined,
+      })),
       feedback,
       lastRun: run,
     };
@@ -210,9 +229,20 @@ export class SupabaseSource implements DataSource {
     fail('Saving company filters', error);
   }
 
-  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'email' | 'criteria' | 'alerts_paused' | 'digest_every'>>) {
+  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'criteria' | 'alerts_paused' | 'digest_every'>>) {
     const { error } = await this.db.from('profiles').update(patch).eq('id', this.userId);
     fail('Saving settings', error);
+  }
+
+  async changeEmail(email: string) {
+    const { error } = await this.db.auth.updateUser({ email }, { emailRedirectTo: location.origin + location.pathname });
+    fail('Changing your email', error);
+  }
+
+  async setInbox(on: boolean) {
+    const { data, error } = await this.db.rpc('set_inbox', { p_on: on });
+    fail(on ? 'Turning on your inbox' : 'Turning off your inbox', error);
+    return (data as string | null) ?? null;
   }
 
   async deleteAccount() {

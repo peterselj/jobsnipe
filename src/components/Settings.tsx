@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { tooBroadTitles } from '../../shared/criteria';
 import { money } from '../../shared/format';
-import type { Criteria, DigestEvery, DiscoverSource, Match, Profile } from '../lib/types';
+import { INBOX_DOMAIN } from '../lib/inbox';
+import type { Criteria, DigestEvery, DiscoverSource, InboxEmail, Match, Profile } from '../lib/types';
 import { Button, Field, Input, SectionHeader } from './ui';
 
 // Lists are edited as comma-separated text: easy to read, easy to paste.
@@ -32,9 +34,11 @@ function missedPlaces(nearMisses: Match[]): [string, number][] {
 }
 
 /** Name, alert email, filters, pausing, and deleting the account. Saving re-checks right away. */
-export default function Settings({ profile, nearMisses, discoverSources, onSave, onPause, onDigest, onDelete, onCancel }: {
+export default function Settings({ profile, nearMisses, discoverSources, inboxEmails, onSave, onPause, onDigest, onInbox, onDelete, onCancel }: {
   profile: Profile;
   discoverSources: DiscoverSource[];
+  inboxEmails: InboxEmail[];
+  onInbox: (on: boolean) => Promise<void>;
   onDigest: (every: DigestEvery) => Promise<void>;
   /** Roles the current filters hid for one reason; used to show what each filter is costing. */
   nearMisses: Match[];
@@ -110,12 +114,13 @@ export default function Settings({ profile, nearMisses, discoverSources, onSave,
     <div className="mx-auto max-w-2xl space-y-5">
       <PauseCard paused={profile.alerts_paused} onPause={onPause} />
       <DigestCard every={profile.digest_every} sources={discoverSources} onChange={onDigest} />
+      <InboxCard token={profile.inbox_token ?? null} emails={inboxEmails} onSet={onInbox} />
 
       <div className={card}>
         <SectionHeader title="You" />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label="Send alerts to" hint="One email per new match, as it's found.">
+          <Field label="Sign in and send alerts to" hint="One email per new match. Changing it sends a confirmation link first.">
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </Field>
         </div>
@@ -127,6 +132,12 @@ export default function Settings({ profile, nearMisses, discoverSources, onSave,
           <Field label="Titles containing any of" hint="Comma-separated, any case. Example: product manager, head of product">
             <Input value={include} onChange={(e) => setInclude(e.target.value)} placeholder="product manager, account manager" />
           </Field>
+          {tooBroadTitles(toList(include)).map((word) => (
+            <p key={word} className={hint} style={{ marginTop: 0 }}>
+              <b>“{word}”</b> by itself matches every {word} role in any field (sales, engineering…), in your inbox and in Discover. Did you mean
+              something like “{word} of product”? “{word[0].toUpperCase() + word.slice(1)}” already counts as a level under <i>Senior and up only</i>.
+            </p>
+          ))}
           <Field label="But not containing" hint="Example: product marketing, intern, associate">
             <Input value={exclude} onChange={(e) => setExclude(e.target.value)} />
           </Field>
@@ -301,6 +312,79 @@ function DigestCard({ every, sources, onChange }: { every: DigestEvery; sources:
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function InboxCard({ token, emails, onSet }: { token: string | null; emails: InboxEmail[]; onSet: (on: boolean) => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState<number | null>(null);
+  const address = token ? `${token}@${INBOX_DOMAIN}` : '';
+  const set = async (on: boolean) => {
+    if (!on && !confirm('Turn off your job-alert inbox? Mail to this address will be dropped. Turning it back on gives you a new address.')) return;
+    setBusy(true);
+    try {
+      await onSet(on);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard blocked: the address is on screen to copy by hand.
+    }
+  };
+  return (
+    <div className="rounded-xl border border-line bg-white p-5">
+      <SectionHeader title="Job-alert inbox" />
+      <p className="mb-3 text-sm text-muted">
+        An email address for job alerts from LinkedIn, Indeed, Wellfound or VC job boards (Sequoia, a16z…). Each hour JobSnipe reads
+        what arrived: roles that pass your filters go to Discover, or to your Inbox (with an email) when they're at a company on your
+        list that JobSnipe can't check directly. Free-form newsletters aren't read yet.
+      </p>
+      {!token ? (
+        <Button variant="primary" onClick={() => set(true)} disabled={busy}>{busy ? 'Turning on…' : 'Get my alerts address'}</Button>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="rounded-md bg-paper px-2.5 py-1.5 font-mono text-sm text-ink">{address}</code>
+            <Button size="sm" onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
+            <Button size="sm" variant="ghost" onClick={() => set(false)} disabled={busy}>Turn off</Button>
+          </div>
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-[13px] text-ink-soft">
+            <li><b>LinkedIn, Indeed, Wellfound, VC boards:</b> create a job alert and use this address, or change an existing alert's email.</li>
+            <li><b>Alerts already going to Gmail:</b> Settings → Forwarding → add this address. Gmail sends a confirmation code here; it shows up below within a minute or two.</li>
+          </ul>
+          <div className="mt-4">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-[.06em] text-muted">Recent emails</div>
+            {emails.length === 0 ? (
+              <p className="text-sm text-muted">Nothing yet. Emails show up here a minute or two after they're sent.</p>
+            ) : (
+              <ul className="divide-y divide-line rounded-lg border border-line text-sm">
+                {emails.map((e) => (
+                  <li key={e.id} className="px-3 py-2">
+                    <button className="flex w-full items-start justify-between gap-3 text-left" onClick={() => setOpen(open === e.id ? null : e.id)}>
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-ink">{e.subject || '(no subject)'}</span>
+                        <span className="block truncate text-xs text-muted">{e.fromName || e.fromAddress} · {new Date(e.receivedAt).toLocaleString()}</span>
+                      </span>
+                      <span className="shrink-0 text-xs text-ink-soft">
+                        {e.jobsFound === undefined ? 'not read yet' : e.jobsFound ? `${e.jobsFound} job${e.jobsFound === 1 ? '' : 's'} found` : 'no jobs found'}
+                      </span>
+                    </button>
+                    {open === e.id && e.text && <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded bg-paper p-2 text-xs text-ink-soft">{e.text.slice(0, 3000)}</pre>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

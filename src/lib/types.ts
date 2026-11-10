@@ -12,6 +12,20 @@ export interface Profile {
   alerts_paused: boolean;
   /** How often the Discover digest email comes. */
   digest_every: DigestEvery;
+  /** The first part of this person's job-alert inbox address; null when the inbox is off. */
+  inbox_token?: string | null;
+}
+
+/** An email that arrived in someone's job-alert inbox. */
+export interface InboxEmail {
+  id: number;
+  fromName?: string;
+  fromAddress?: string;
+  subject?: string;
+  receivedAt: string;
+  /** Unset until the hourly check has read it. */
+  jobsFound?: number;
+  text?: string;
 }
 
 export type DigestEvery = 'daily' | 'weekly' | 'biweekly' | 'never';
@@ -31,6 +45,8 @@ export interface Match {
   missDetail?: string;
   /** Set for Discover: passes your filters at a company you don't watch; which VC boards list it. */
   via?: string[];
+  /** From your job-alert emails, at a company on your list JobSnipe can't check directly: an Inbox role. */
+  onList?: boolean;
   /** The company's own board, when known (for "Watch this company"). */
   ats?: Ats;
   board?: string;
@@ -101,4 +117,6 @@ export interface Snapshot {
   feedback: Feedback;
   lastRun?: Run;
   discoverSources: DiscoverSource[];
+  /** The latest emails in this person's job-alert inbox. */
+  inboxEmails: InboxEmail[];
 }

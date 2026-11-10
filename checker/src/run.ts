@@ -1,8 +1,10 @@
 import { boardUrl, detailFetchers, fetchers } from "./ats/index.js";
 import { baselineEmail, healthEmail, matchEmail, type BaselineCompany, type Mailer } from "./email.js";
 import { withWatchFilters } from "../../shared/criteria.js";
+import { safeHttpUrl } from "../../shared/url.js";
 import { runDiscover, type LookupPay, type SearchSource } from "./discover/run.js";
 import { evaluate, nearMiss, titleCheck, toFilters } from "./filters.js";
+import { Handled, REPOST_FLAG } from "./reposts.js";
 import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "./store.js";
 import type { Ats, BoardResult, Details, Filters, FilterResult, Posting } from "./types.js";
 
@@ -84,6 +86,8 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
       let patch: Partial<CompanyRow>;
       try {
         const result = await fetch(c.ats, c.board, c.name, c.etag ?? undefined);
+        // Only ordinary web links are kept (see shared/url.ts); a job without one can't be shown.
+        if (!result.unchanged) result.postings = result.postings.filter((p) => safeHttpUrl(p.url));
         fetched.set(c.id, result);
         patch = { last_checked_at: iso, last_ok_at: iso, last_error: null, consecutive_failures: 0, failure_alert_sent: false };
         if (!result.unchanged) patch.open_postings = result.postings.length;
@@ -176,6 +180,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
 
     // 3. Per person: matches for the page, a summary for newly watched companies, an email per new match.
     const alerted = await store.alerted();
+    const handled = new Handled(await store.handled());
     for (const person of people) {
       const mine = watches.filter((w) => w.profile_id === person.id);
       // While alerts are paused nothing is emailed, but alerts are still recorded as handled so
@@ -201,7 +206,9 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         const checkedNow = fetched.has(c.id);
         const results = (open.get(c.id) ?? []).map((p) => {
           const shown = { ...p, company: w.name }; // each person's own name for the company
-          return { p: shown, r: evaluate(shown, filters, now) };
+          const r = evaluate(shown, filters, now);
+          if (r.pass && handled.isRepost(person.id, shown)) r.flags = [...r.flags, REPOST_FLAG];
+          return { p: shown, r };
         });
         const passing = results.filter((x) => x.r.pass);
         for (const { p, r } of results) {
@@ -235,7 +242,9 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
           const key = `${person.id}|${p.id}`;
           if (alerted.has(key) || Date.parse(p.firstSeenAt) <= since) continue;
           try {
-            await deliver(matchEmail(person.email, p, r, now));
+            // A repost of a role you already handled shows in the inbox (flagged) but isn't emailed.
+            if (!r.flags.includes(REPOST_FLAG)) await deliver(matchEmail(person.email, p, r, now));
+            else log("  – repost of a handled role: not emailed");
             alerted.add(key);
             newAlerts.push({ profile_id: person.id, posting_id: p.id });
             if (!paused) summary.alerts_sent++;
@@ -293,8 +302,8 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     // 5. Discover: VC portfolio boards, every few hours, summed up in a digest. A problem there never
     //    holds up your own list, which is done by now.
     try {
-      const d = await runDiscover({ store, mailer, people, watches, companies, now, search: opts.searchDiscover, lookupPay: opts.lookupDiscoverPay, log, redact });
-      summary.alerts_sent += d.digests;
+      const d = await runDiscover({ store, mailer, people, watches, companies, now, search: opts.searchDiscover, lookupPay: opts.lookupDiscoverPay, handled, log, redact });
+      summary.alerts_sent += d.emails;
       summary.errors.push(...d.errors);
     } catch (e) {
       summary.errors.push(`discover failed: ${redact(msg(e))}`);

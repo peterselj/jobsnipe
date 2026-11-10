@@ -50,3 +50,17 @@ export function describeWatchFilters(w: WatchFilters | null | undefined): string
   if (w.exclude_titles?.length) parts.push(`skips ${w.exclude_titles.join(', ')}`);
   return parts.join(' · ') || undefined;
 }
+
+/** Words that say a level or a kind of worker, not a job: alone, they match across every department. */
+const LEVEL_WORDS = new Set([
+  'director', 'manager', 'lead', 'head', 'senior', 'sr', 'staff', 'principal', 'vp', 'chief', 'associate', 'junior',
+  'executive', 'officer', 'president', 'specialist', 'coordinator', 'analyst', 'consultant', 'partner', 'intern',
+]);
+
+/**
+ * Title entries that are one level word by itself ("director"): they match every such role in any
+ * field (Director of Sales, Director of Engineering...), which is rarely what's meant.
+ */
+export function tooBroadTitles(include: string[] | undefined): string[] {
+  return (include ?? []).map((t) => t.trim().toLowerCase()).filter((t) => LEVEL_WORDS.has(t));
+}
