@@ -52,6 +52,9 @@ Action) hourly; it reads the boards, saves what changed, and emails through Brev
   archives the role here.
 - **Tailor resume.** On Interested roles: copies the posting's text (Greenhouse, Lever, Ashby) and
   hands off to ResumeMachine, which tailors your resume in your own AI assistant.
+- **Guided tour.** Two minutes on the demo's made-up companies, in the same style as JobBoard's:
+  spotlights and short steps, some of them "your turn" (star a role, open Near misses and
+  Discover). Offered on the sign-in page, in the demo, and to a new account with no filters yet.
 - **Looking after itself.** Unchanged boards cost almost nothing; a broken board emails you after
   two failed hours; a Discover failure never holds up your list; pause alerts; delete account. A
   heartbeat on GitHub's own clock fails (and GitHub emails the owner) if no check has finished in

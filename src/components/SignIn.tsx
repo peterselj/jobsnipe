@@ -3,7 +3,7 @@ import { supabase, supabaseConfigured } from '../lib/supabase';
 import { Button, Field, Input, Mark } from './ui';
 
 /** Email-link sign-in: no passwords, no accounts to set up beyond an email address. */
-export default function SignIn({ onDemo }: { onDemo: () => void }) {
+export default function SignIn({ onDemo, onTour }: { onDemo: () => void; onTour: () => void }) {
   const [email, setEmail] = useState('');
   const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -69,9 +69,11 @@ export default function SignIn({ onDemo }: { onDemo: () => void }) {
                   <Button variant="primary" onClick={send} disabled={!supabaseConfigured || state === 'sending' || !email.includes('@')}>
                     {state === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
                   </Button>
-                  <button onClick={onDemo} className="text-sm font-medium text-forest underline-offset-2 hover:underline">
-                    Just looking? See the demo →
-                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-sm">
+                  <span className="text-muted">Just looking?</span>
+                  <button onClick={onTour} className="font-semibold text-forest underline-offset-2 hover:underline">Take the 2-minute tour →</button>
+                  <button onClick={onDemo} className="font-medium text-forest underline-offset-2 hover:underline">or explore the demo</button>
                 </div>
               </div>
             </>

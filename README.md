@@ -1,9 +1,16 @@
 # ◎ JobSnipe
 
-**https://peterselj.github.io/jobsnipe/** · [try the demo](https://peterselj.github.io/jobsnipe/?demo)
+**https://peterselj.github.io/jobsnipe/** · [take the 2-minute tour](https://peterselj.github.io/jobsnipe/?tour) · [try the demo](https://peterselj.github.io/jobsnipe/?demo)
 
 JobSnipe checks your target companies' job boards every hour and emails you the moment a role
 that fits is posted, so you can be one of the first applicants. Sign in with just your email.
+
+## New here? Take the tour
+
+[The tour](https://peterselj.github.io/jobsnipe/?tour) walks through a demo with made-up companies,
+with spotlights and short steps: your list of companies, a new role arriving, deciding on it, Near
+misses, Discover, adding a role yourself, filters and suggestions. Nothing is saved. It's also
+offered on the sign-in page, in the demo's top bar, and to a new account before any filters are set.
 
 ## What it does
 
