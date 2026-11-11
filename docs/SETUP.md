@@ -93,11 +93,15 @@ Brevo, which hands each email to a small Supabase function; the checker reads th
    the subdomain's DNS). Add the TXT and two CNAME records it lists (CNAMEs as "DNS only"), next to
    the main domain's existing `brevo1._domainkey` / `brevo2._domainkey` records, which stay as they
    are. Press Verify records until they're green.
-3. **Supabase function:** Edge Functions → **Deploy a new function** → **Via Editor** → name it
-   `inbound-email` → replace the sample code with all of
+3. **Supabase function:** Edge Functions → **Deploy a new function** → **Via Editor** → set the
+   name to `inbound-email` **before deploying** → replace the sample code with all of
    [`supabase/functions/inbound-email/index.ts`](../supabase/functions/inbound-email/index.ts) →
-   Deploy. Then open the function's **Details** and turn **Enforce JWT verification** off (Brevo
-   can't send a Supabase key; the function only files mail for addresses that exist).
+   Deploy. The name at that moment decides the function's address: check the URL under its title
+   ends in `/functions/v1/inbound-email`. If it ends in a made-up name like `quick-task`, renaming
+   won't change it; delete the function and create it again. Then open its **Settings** tab and
+   turn **Verify JWT with legacy secret** off (Brevo can't send a Supabase key; the function checks
+   the key in Brevo's webhook address instead). Its **Test** button answering "not allowed" is
+   normal: the test doesn't carry that key.
 4. **Brevo:** GitHub → Actions → **Set up job-alert inbox** → Run workflow (the subdomain is filled
    in). It reads a key the database made in step 1 and puts it in the webhook's address, so only
    Brevo can file mail; you never see or copy that key. If it fails with "Domain is not found or is inactive", step 2 isn't complete: the MX records
