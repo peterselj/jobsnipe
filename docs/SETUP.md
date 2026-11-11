@@ -87,6 +87,12 @@ Brevo, which hands each email to a small Supabase function; the checker reads th
    (Sendinblue is Brevo's old name; its developer guide "Parse inbound email" lists the current
    values). In Cloudflare: DNS → Records → Add record → Type MX, Name `alerts`, Mail server as above.
    Remove any other MX record named `alerts`; leave the ones for the main domain alone.
+   Then add the subdomain in Brevo too, or the next steps fail with "Domain is not found or is
+   inactive": Brevo → account menu → Senders, Domains & Dedicated IPs → Domains → Add a domain →
+   `alerts.joshpetersel.com` → **Individual DNS records** (not "Brevo-managed", which would take over
+   the subdomain's DNS). Add the TXT and two CNAME records it lists (CNAMEs as "DNS only"), next to
+   the main domain's existing `brevo1._domainkey` / `brevo2._domainkey` records, which stay as they
+   are. Press Verify records until they're green.
 3. **Supabase function:** Edge Functions → **Deploy a new function** → **Via Editor** → name it
    `inbound-email` → replace the sample code with all of
    [`supabase/functions/inbound-email/index.ts`](../supabase/functions/inbound-email/index.ts) →
@@ -94,8 +100,8 @@ Brevo, which hands each email to a small Supabase function; the checker reads th
    can't send a Supabase key; the function only files mail for addresses that exist).
 4. **Brevo:** GitHub → Actions → **Set up job-alert inbox** → Run workflow (the subdomain is filled
    in). It reads a key the database made in step 1 and puts it in the webhook's address, so only
-   Brevo can file mail; you never see or copy that key. If it fails with "Domain is not found or is inactive", Brevo can't see the MX records from step 2
-   yet: check them and try again in a few minutes. If it says the key isn't allowed, make a new Brevo API key with webhook access,
+   Brevo can file mail; you never see or copy that key. If it fails with "Domain is not found or is inactive", step 2 isn't complete: the MX records
+   aren't live yet, or the subdomain hasn't been added and verified in Brevo. If it says the key isn't allowed, make a new Brevo API key with webhook access,
    replace the `BREVO_API_KEY` secret, and run it again.
 5. **Try it:** JobSnipe → Settings → Job-alert inbox → **Get my alerts address**, then send any email
    to it. It should appear under "Recent emails" within a minute or two (marked "not read yet" until
