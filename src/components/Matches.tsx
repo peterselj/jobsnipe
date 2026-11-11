@@ -34,6 +34,8 @@ interface Props {
   suggestions?: number;
   /** Show "→ JobBoard" on Interested roles (opt-in, Settings). */
   jobBoard?: boolean;
+  /** Start the guided tour (offered to someone who hasn't set anything up yet). */
+  onTour?: () => void;
 }
 
 const DAY = 86_400_000;
@@ -74,7 +76,7 @@ const ARCHIVE_RECENT_DAYS = 30;
  * good, so it never comes back. Decided and archived roles are read from the saved verdicts, so
  * they stay listed after the posting closes.
  */
-export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings, onWatch, discoverSources, digestEvery, suggestions, jobBoard }: Props) {
+export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings, onWatch, discoverSources, digestEvery, suggestions, jobBoard, onTour }: Props) {
   const [folder, setFolder] = useState<Folder>('inbox');
   const [missFilter, setMissFilter] = useState<MissCheck | null>(null);
   const [viaFilter, setViaFilter] = useState<string | null>(null);
@@ -160,6 +162,7 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
           <button
             key={t.key}
             role="tab"
+            data-tour={`tab-${t.key}`}
             aria-selected={folder === t.key}
             onClick={() => setFolder(t.key)}
             className={`-mb-px flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
@@ -290,15 +293,17 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
         </div>
       )}
 
-      {shown.length === 0 && !(folder === 'archive' && olderCount) ? (
-        <Empty folder={folder} needsFilters={needsFilters} onOpenSettings={onOpenSettings} />
-      ) : (
-        <div className="space-y-2.5">
-          {shown.map((m) => (
-            <MatchCard key={m.id} m={m} verdict={feedback[m.id]} onVerdict={onVerdict} onWatch={onWatch} jobBoard={jobBoard} />
-          ))}
-        </div>
-      )}
+      <div data-tour="roles">
+        {shown.length === 0 && !(folder === 'archive' && olderCount) ? (
+          <Empty folder={folder} needsFilters={needsFilters} onOpenSettings={onOpenSettings} onTour={onTour} />
+        ) : (
+          <div className="space-y-2.5">
+            {shown.map((m) => (
+              <MatchCard key={m.id} m={m} verdict={feedback[m.id]} onVerdict={onVerdict} onWatch={onWatch} jobBoard={jobBoard} />
+            ))}
+          </div>
+        )}
+      </div>
       {folder === 'archive' && olderCount > 0 && (
         <div className="mt-3 text-center">
           <button className="text-sm font-semibold text-forest underline-offset-2 hover:underline" onClick={() => setShowOlder(!showOlder)}>
@@ -310,13 +315,17 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
   );
 }
 
-function Empty({ folder, needsFilters, onOpenSettings }: { folder: Folder; needsFilters?: boolean; onOpenSettings?: () => void }) {
+function Empty({ folder, needsFilters, onOpenSettings, onTour }: { folder: Folder; needsFilters?: boolean; onOpenSettings?: () => void; onTour?: () => void }) {
   if (folder === 'inbox' && needsFilters) {
     return (
       <div className="rounded-xl border border-dashed border-line-strong bg-white/60 px-5 py-8 text-center text-sm text-ink-soft">
         <p className="font-semibold">Tell JobSnipe what you're looking for</p>
         <p className="mt-1 text-muted">Set the job titles and places you want, then add the companies you'd love to work at.</p>
-        {onOpenSettings && <Button variant="primary" className="mt-4" onClick={onOpenSettings}>Set your filters</Button>}
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          {onOpenSettings && <Button variant="primary" onClick={onOpenSettings}>Set your filters</Button>}
+          {onTour && <Button onClick={onTour}>Take the 2-minute tour first</Button>}
+        </div>
+        {onTour && <p className="mt-2 text-xs text-muted">The tour uses made-up companies; your account isn't touched.</p>}
       </div>
     );
   }

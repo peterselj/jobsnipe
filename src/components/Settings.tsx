@@ -169,7 +169,7 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
         </div>
       </div>
 
-      <div className={card}>
+      <div className={card} data-tour="filters">
         <SectionHeader title="Job titles" />
         <div className="space-y-3">
           <Field label="Titles containing any of" hint="Comma-separated, any case. Example: product manager, head of product">
@@ -347,7 +347,7 @@ function SuggestionsCard({ suggestions, onAccept, onDismiss }: { suggestions: Su
     }
   };
   return (
-    <div className="rounded-xl border border-forest-2/50 bg-emerald-50/40 p-5">
+    <div data-tour="suggestions" className="rounded-xl border border-forest-2/50 bg-emerald-50/40 p-5">
       <SectionHeader title={`Suggestions · ${suggestions.length}`} />
       <p className="mb-3 text-sm text-muted">
         Patterns in what you've marked ★ Interested and Not for me. Nothing changes unless you accept it, and anything you accept can be

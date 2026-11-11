@@ -31,7 +31,7 @@ export default function Companies({ watches, criteria, onSetFilters, onAdd, onCh
   const failing = watches.filter((w) => w.status === 'failing').length;
 
   return (
-    <section>
+    <section data-tour="companies">
       <SectionHeader title={<>Companies <span className="ml-1 font-mono text-[10px] text-muted">{watches.length}</span></>}>
         <Button size="sm" variant="primary" onClick={() => setFinding({ mode: 'add' })}>+ Add company</Button>
       </SectionHeader>

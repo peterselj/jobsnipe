@@ -5,6 +5,7 @@ import Companies from './components/Companies';
 import Matches from './components/Matches';
 import Settings from './components/Settings';
 import SignIn from './components/SignIn';
+import Tour from './components/Tour';
 import { Button, Mark } from './components/ui';
 import { capturePendingAdd, manualId, takePendingAdd, type RoleDraft } from './lib/addRole';
 import { DemoSource } from './lib/demo';
@@ -22,7 +23,13 @@ const CHECK_TIMEOUT_MS = 6 * 60_000;
 capturePendingAdd();
 
 export default function App() {
-  const [demo, setDemo] = useState(() => new URLSearchParams(location.search).has('demo'));
+  const [demo, setDemo] = useState(() => new URLSearchParams(location.search).has('demo') || new URLSearchParams(location.search).has('tour'));
+  // The guided tour runs on the demo's made-up companies (?tour opens straight into it).
+  const [tour, setTour] = useState(() => new URLSearchParams(location.search).has('tour'));
+  const startTour = () => {
+    setTour(true);
+    setDemo(true);
+  };
   // undefined while we find out whether this browser is signed in.
   const [session, setSession] = useState<Session | null | undefined>(supabaseConfigured ? undefined : null);
 
@@ -44,10 +51,14 @@ export default function App() {
       <Dashboard
         key={demo ? 'demo' : userId}
         source={source}
+        startTour={demo && tour}
+        hasAccount={!!userId}
+        onTour={startTour}
         onLeave={async () => {
           if (demo) {
             history.replaceState(null, '', location.pathname);
             setDemo(false);
+            setTour(false);
           } else {
             await supabase().auth.signOut();
           }
@@ -56,12 +67,22 @@ export default function App() {
     );
   }
   if (session === undefined) return <div className="min-h-screen bg-paper" />;
-  return <SignIn onDemo={() => setDemo(true)} />;
+  return <SignIn onDemo={() => setDemo(true)} onTour={startTour} />;
 }
 
 type Check = { state: 'idle' } | { state: 'running'; since: number } | { state: 'failed' };
 
-function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => void }) {
+function Dashboard({ source, onLeave, startTour, hasAccount, onTour }: {
+  source: DataSource;
+  onLeave: () => void;
+  /** Open with the guided tour running (demo only). */
+  startTour: boolean;
+  /** Someone signed in is visiting the demo, so leaving it goes back to their account. */
+  hasAccount: boolean;
+  /** Switch to the demo and start the tour. */
+  onTour: () => void;
+}) {
+  const [touring, setTouring] = useState(startTour && source.kind === 'demo');
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [view, setView] = useState<'matches' | 'settings'>('matches');
   const [error, setError] = useState<string | null>(null);
@@ -175,7 +196,13 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
       {source.kind === 'demo' && (
         <div className="bg-forest-deep px-4 py-2 text-center text-[13px] text-white">
           Demo with made-up companies. Nothing is saved.{' '}
-          <button onClick={onLeave} className="font-semibold underline underline-offset-2">Sign up →</button>
+          {!touring && (
+            <>
+              <button onClick={() => { setView('matches'); setTouring(true); }} className="font-semibold underline underline-offset-2">Take the tour</button>
+              {' · '}
+            </>
+          )}
+          <button onClick={onLeave} className="font-semibold underline underline-offset-2">{hasAccount ? 'Back to my account →' : 'Sign up →'}</button>
         </div>
       )}
 
@@ -200,7 +227,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             <Button variant={stale ? 'primary' : 'secondary'} onClick={() => runCheck()} disabled={check.state === 'running'}>
               {check.state === 'running' ? <CheckingLabel since={check.since} /> : '↻ Check now'}
             </Button>
-            <Button variant="ghost" onClick={() => setAdding(true)} title="Add a job you found yourself, on LinkedIn or anywhere">＋ Add role</Button>
+            <Button variant="ghost" data-tour="add-role" onClick={() => setAdding(true)} title="Add a job you found yourself, on LinkedIn or anywhere">＋ Add role</Button>
             <Button variant="ghost" onClick={() => setView(view === 'settings' ? 'matches' : 'settings')}>
               {view === 'settings' ? '← Matches' : 'Settings'}
             </Button>
@@ -337,6 +364,7 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             digestEvery={snap.profile.digest_every}
             suggestions={suggestions.length}
             jobBoard={snap.profile.send_to_jobboard}
+            onTour={source.kind === 'demo' ? undefined : onTour}
             onWatch={async (w) => {
               try {
                 await addWatch(w);
@@ -372,6 +400,17 @@ function Dashboard({ source, onLeave }: { source: DataSource; onLeave: () => voi
             />
           </aside>
         </main>
+      )}
+
+      {touring && (
+        <Tour
+          view={view}
+          setView={setView}
+          interested={Object.values(snap.feedback).filter((v) => v.verdict === 'interested' && !v.archivedAt).length}
+          exitLabel={hasAccount ? 'Back to my account' : 'Sign up →'}
+          onExit={onLeave}
+          onEnd={() => setTouring(false)}
+        />
       )}
     </div>
   );
