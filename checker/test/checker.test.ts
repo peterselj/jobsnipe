@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeMailer, type Email, type Mailer } from "../src/email.js";
-import { evaluate, toFilters } from "../src/filters.js";
+import { evaluate, titleCheck, toFilters } from "../src/filters.js";
 import { htmlToText, parseCompText } from "../src/normalize.js";
 import { runCheck as realRunCheck, type RunOptions } from "../src/run.js";
 import { HttpError } from "../src/ats/http.js";
@@ -39,6 +39,20 @@ describe("filters", () => {
     const high = evaluate(post({ title: "Product Manager, Platform", comp: { min: 305000, max: 385000, currency: "USD" } }), f);
     expect(high.pass).toBe(true);
     expect(high.flags.join()).toMatch(/no level in title/);
+  });
+
+  it("title phrases ignore punctuation but still match whole words", () => {
+    const vp = toFilters({ titles: { include: ["vp product", "vice president product"], exclude: ["product marketing"] } });
+    for (const t of ["VP Product", "VP, Product", "VP - Product", "Vice President, Product", "SVP/VP, Product (Media)"]) {
+      expect(titleCheck(t, vp), t).toBeUndefined();
+    }
+    expect(titleCheck("VP, Product Marketing", vp)).toBe('title excluded ("product marketing")');
+    expect(titleCheck("VP, Productivity", vp)).toBe("title outside role family"); // whole words only
+    expect(titleCheck("SVP Product", vp)).toBe("title outside role family"); // "svp" is its own word
+    expect(titleCheck("Vice President of Product", vp)).toBe("title outside role family"); // extra word in between
+    // A level written with a full stop still counts as that level.
+    const senior = toFilters({ titles: { include: ["product manager"] }, seniority: { require: ["sr", "senior"] } });
+    expect(evaluate(post({ title: "Sr. Product Manager" }), { ...senior, locations: f.locations }, new Date()).reasons).not.toContain("title isn't senior or above");
   });
 
   it("locations and remote scope", () => {

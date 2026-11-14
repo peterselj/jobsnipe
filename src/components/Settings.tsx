@@ -175,7 +175,7 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
       <div className={card} data-tour="filters">
         <SectionHeader title="Job titles" />
         <div className="space-y-3">
-          <Field label="Titles containing any of" hint="Comma-separated, any case. Example: product manager, head of product">
+          <Field label="Titles containing any of" hint="Comma-separated, any case. Punctuation in job titles is ignored, so “vp product” also matches “VP, Product”. Example: product manager, head of product">
             <Input value={include} onChange={(e) => setInclude(e.target.value)} placeholder="product manager, account manager" />
           </Field>
           {tooBroadTitles(toList(include)).map((word) => (

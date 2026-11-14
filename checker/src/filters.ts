@@ -36,10 +36,22 @@ const OTHER_REGIONS = [
   "estonia", "israel", "korea",
 ];
 
+/** A title or title phrase as plain words: lowercase, punctuation as spaces ("VP, Product" → "vp product"). */
+const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9+#]+/g, " ").trim();
+
+/**
+ * Whether a job title contains a phrase, as whole words and ignoring punctuation, since the same
+ * role is written "VP Product", "VP, Product" or "VP - Product".
+ */
+export function titleHas(title: string, phrase: string): boolean {
+  const p = words(phrase);
+  return p !== "" && ` ${words(title)} `.includes(` ${p} `);
+}
+
 export function titleCheck(title: string, f: Filters): string | undefined {
   if (!f.titles.include.length) return "no job titles set in your filters";
-  if (!f.titles.include.some((t) => hasTerm(title, t))) return "title outside role family";
-  const ex = f.titles.exclude.find((t) => hasTerm(title, t));
+  if (!f.titles.include.some((t) => titleHas(title, t))) return "title outside role family";
+  const ex = f.titles.exclude.find((t) => titleHas(title, t));
   return ex ? `title excluded ("${ex}")` : undefined;
 }
 
@@ -49,7 +61,7 @@ export function titleCheck(title: string, f: Filters): string | undefined {
  */
 export function seniorityCheck(post: Posting, f: Filters): { fail?: string; flag?: string } {
   const s = f.seniority;
-  if (!s || s.require.some((t) => hasTerm(post.title, t))) return {};
+  if (!s || s.require.some((t) => titleHas(post.title, t))) return {};
   const floor = s.unlevelled_pay_min;
   if (floor !== undefined && post.comp && post.comp.min >= floor) {
     return { flag: "no level in title; pay suggests senior" };
