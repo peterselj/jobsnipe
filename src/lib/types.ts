@@ -14,6 +14,12 @@ export interface Profile {
   digest_every: DigestEvery;
   /** Show "→ JobBoard" on Interested roles. Off unless this person turned it on. */
   send_to_jobboard: boolean;
+  /** Show the Near misses tab. Off for new accounts until turned on. */
+  near_misses_on: boolean;
+  /** Discover (roles beyond your list, and its digest). Off for new accounts until turned on. */
+  discover_on: boolean;
+  /** A "still watching, nothing new" email after 30 days without one. */
+  monthly_note: boolean;
   /** The first part of this person's job-alert inbox address; null when the inbox is off. */
   inbox_token?: string | null;
 }

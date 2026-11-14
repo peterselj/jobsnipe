@@ -327,6 +327,12 @@ function Dashboard({ source, onLeave, startTour, hasAccount, onTour }: {
               await reload();
               flash(every === 'never' ? 'No Discover emails; the tab still updates.' : `Discover digest: ${every === 'biweekly' ? 'every 2 weeks' : every}.`);
             }}
+            onShow={async (patch) => {
+              await source.saveProfile(patch);
+              await reload();
+              if (patch.discover_on) flash('Discover is on. Roles beyond your list show up within a few hours.');
+              else if (patch.near_misses_on) flash('Near misses now has its own tab.');
+            }}
             onPause={async (paused) => {
               await source.saveProfile({ alerts_paused: paused });
               await reload(); // the banner and the card show the new state
@@ -365,6 +371,8 @@ function Dashboard({ source, onLeave, startTour, hasAccount, onTour }: {
             suggestions={suggestions.length}
             jobBoard={snap.profile.send_to_jobboard}
             onTour={source.kind === 'demo' ? undefined : onTour}
+            showNear={snap.profile.near_misses_on}
+            showDiscover={snap.profile.discover_on}
             onWatch={async (w) => {
               try {
                 await addWatch(w);

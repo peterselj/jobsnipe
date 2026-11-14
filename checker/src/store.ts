@@ -120,6 +120,8 @@ export interface Store {
   openDiscoverPostings(since: string): Promise<DiscoverJob[]>;
   syncDiscoverMatches(profileId: string, rows: DiscoverMatchRow[]): Promise<void>;
   markDigested(profileId: string, at: string): Promise<void>;
+  /** JobSnipe emailed this person just now: the 30 quiet days start again. */
+  markHeard(profileIds: string[], at: string): Promise<void>;
   /** Pay looked up on the company's own board (undefined: it lists none). */
   saveDiscoverPay(rows: { id: string; comp?: Posting["comp"] }[]): Promise<void>;
   /** Job-alert emails not read yet, oldest first. */
@@ -183,7 +185,7 @@ export class SupabaseStore implements Store {
   }
 
   async people() {
-    return this.all<Person>("load profiles", (a, b) => this.db.from("profiles").select("id, name, email, criteria, alert_mode, alerts_paused, digest_every, last_digest_at").order("id").range(a, b));
+    return this.all<Person>("load profiles", (a, b) => this.db.from("profiles").select("id, name, email, criteria, alert_mode, alerts_paused, digest_every, last_digest_at, discover_on, monthly_note, quiet_since").order("id").range(a, b));
   }
 
   async watches() {
@@ -346,5 +348,10 @@ export class SupabaseStore implements Store {
 
   async markDigested(profileId: string, at: string) {
     this.check(await this.db.from("profiles").update({ last_digest_at: at }).eq("id", profileId), "mark digest sent");
+  }
+
+  async markHeard(profileIds: string[], at: string) {
+    if (!profileIds.length) return;
+    this.check(await this.db.from("profiles").update({ quiet_since: at }).in("id", profileIds), "mark people emailed");
   }
 }

@@ -1,15 +1,25 @@
 import { boardUrl, detailFetchers, fetchers } from "./ats/index.js";
-import { baselineEmail, healthEmail, matchEmail, type BaselineCompany, type Mailer } from "./email.js";
+import { baselineEmail, healthEmail, matchEmail, quietEmail, type BaselineCompany, type Mailer, type QuietStanding } from "./email.js";
 import { withWatchFilters } from "../../shared/criteria.js";
 import { safeHttpUrl } from "../../shared/url.js";
 import { runDiscover, type LookupPay, type SearchSource } from "./discover/run.js";
 import { evaluate, nearMiss, titleCheck, toFilters } from "./filters.js";
 import { Handled, REPOST_FLAG } from "./reposts.js";
 import type { CompanyRow, KnownPosting, MatchRow, PostingChanges, RunSummary, Store, StoredPosting, WatchRow } from "./store.js";
-import type { Ats, BoardResult, Details, Filters, FilterResult, Posting } from "./types.js";
+import type { Ats, BoardResult, Details, Filters, FilterResult, Person, Posting } from "./types.js";
 
 /** Consecutive failed checks before we email about a broken board (2 = about two hours). */
 export const FAILURE_ALERT_AFTER = 2;
+
+/** Days without any email before the monthly "still watching" note goes out. */
+export const QUIET_NOTE_AFTER_DAYS = 30;
+
+/** Due when they want it, aren't paused, have a list, and haven't had an email in 30 days. */
+export function quietNoteDue(person: Pick<Person, "monthly_note" | "alerts_paused" | "quiet_since">, s: QuietStanding, now: Date): boolean {
+  if (!person.monthly_note || person.alerts_paused || !person.quiet_since) return false;
+  if (!s.watching.length && !s.notChecked.length) return false;
+  return now.getTime() - Date.parse(person.quiet_since) >= QUIET_NOTE_AFTER_DAYS * 86_400_000;
+}
 
 /** Cap on per-posting detail lookups per board per run, so a big new watcher can't stall a run. */
 export const MAX_PAY_LOOKUPS = 40;
@@ -181,12 +191,19 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     // 3. Per person: matches for the page, a summary for newly watched companies, an email per new match.
     const alerted = await store.alerted();
     const handled = new Handled(await store.handled());
+    // Who got an email this run, and what each person's list looks like, for the monthly note.
+    const heard = new Set<string>();
+    const standing = new Map<string, QuietStanding>();
     for (const person of people) {
       const mine = watches.filter((w) => w.profile_id === person.id);
       // While alerts are paused nothing is emailed, but alerts are still recorded as handled so
       // resuming doesn't send everything found in the meantime.
       const paused = !!person.alerts_paused;
-      const deliver = (e: Parameters<Mailer["send"]>[0]) => (paused ? Promise.resolve() : mailer.send(e));
+      const deliver = async (e: Parameters<Mailer["send"]>[0]) => {
+        if (paused) return;
+        await mailer.send(e);
+        heard.add(person.id);
+      };
       const matches: MatchRow[] = [];
       const summaryMatches: { p: Posting; r: FilterResult }[] = [];
       const summaryCompanies: BaselineCompany[] = [];
@@ -257,6 +274,12 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
       }
 
       await store.syncMatches(person.id, matches);
+      standing.set(person.id, {
+        watching: mine.filter((w) => w.company_id !== null && !companies.get(w.company_id)!.consecutive_failures).map((w) => w.name),
+        notChecked: mine.filter((w) => w.company_id === null || companies.get(w.company_id)!.consecutive_failures > 0).map((w) => w.name),
+        open: matches.filter((m) => !m.near_miss).length,
+        nearMisses: matches.filter((m) => m.near_miss).length,
+      });
 
       if (toBaseline.length) {
         summaryMatches.sort((a, b) => (b.p.atsPostedAt ?? "").localeCompare(a.p.atsPostedAt ?? ""));
@@ -290,6 +313,7 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         });
         try {
           await mailer.send(healthEmail(person.email, list));
+          heard.add(person.id);
           summary.alerts_sent++;
         } catch (e) {
           allSent = false;
@@ -302,11 +326,31 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     // 5. Discover: VC portfolio boards, every few hours, summed up in a digest. A problem there never
     //    holds up your own list, which is done by now.
     try {
-      const d = await runDiscover({ store, mailer, people, watches, companies, now, search: opts.searchDiscover, lookupPay: opts.lookupDiscoverPay, handled, log, redact });
+      const d = await runDiscover({ store, mailer, people, watches, companies, now, search: opts.searchDiscover, lookupPay: opts.lookupDiscoverPay, handled, heard, log, redact });
       summary.alerts_sent += d.emails;
       summary.errors.push(...d.errors);
     } catch (e) {
       summary.errors.push(`discover failed: ${redact(msg(e))}`);
+    }
+
+    // 6. The monthly note: after 30 days without any email, a short "still watching, nothing new",
+    //    so silence doesn't look like JobSnipe has stopped. Opt-out in Settings.
+    try {
+      for (const person of people) {
+        const s = standing.get(person.id);
+        if (heard.has(person.id) || !s || !quietNoteDue(person, s, now)) continue;
+        try {
+          await mailer.send(quietEmail(person.email, s, toFilters(person.criteria).titles.include));
+          heard.add(person.id);
+          summary.alerts_sent++;
+          log("  ✉ monthly still-watching note sent");
+        } catch (e) {
+          summary.errors.push(`monthly note failed: ${redact(msg(e))}`);
+        }
+      }
+      await store.markHeard([...heard], iso);
+    } catch (e) {
+      summary.errors.push(`monthly note failed: ${redact(msg(e))}`);
     }
 
     await store.prune(now);

@@ -52,6 +52,11 @@ Action) hourly; it reads the boards, saves what changed, and emails through Brev
   archives the role here.
 - **Tailor resume.** On Interested roles: copies the posting's text (Greenhouse, Lever, Ashby) and
   hands off to ResumeMachine, which tailors your resume in your own AI assistant.
+- **A quiet search.** For someone not actively looking who wants a ping when one specific role
+  opens: a new account starts with just the inbox (Near misses and Discover are off until turned on
+  in Settings → Extras; accounts from before Nov 14 keep both). After 30 days without any email, a
+  short "still watching, nothing new" note says what's being checked and for what, so silence
+  doesn't look like JobSnipe stopped. Opt-out.
 - **Guided tour.** Two minutes on the demo's made-up companies, in the same style as JobBoard's:
   spotlights and short steps, some of them "your turn" (star a role, open Near misses and
   Discover). Offered on the sign-in page, in the demo, and to a new account with no filters yet.

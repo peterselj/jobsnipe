@@ -34,6 +34,9 @@ interface Props {
   suggestions?: number;
   /** Show "→ JobBoard" on Interested roles (opt-in, Settings). */
   jobBoard?: boolean;
+  /** Optional tabs, each turned on in Settings. */
+  showNear?: boolean;
+  showDiscover?: boolean;
   /** Start the guided tour (offered to someone who hasn't set anything up yet). */
   onTour?: () => void;
 }
@@ -76,7 +79,7 @@ const ARCHIVE_RECENT_DAYS = 30;
  * good, so it never comes back. Decided and archived roles are read from the saved verdicts, so
  * they stay listed after the posting closes.
  */
-export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings, onWatch, discoverSources, digestEvery, suggestions, jobBoard, onTour }: Props) {
+export default function Matches({ matches, feedback, onVerdict, onVerdicts, needsFilters, onOpenSettings, onWatch, discoverSources, digestEvery, suggestions, jobBoard, onTour, showNear = true, showDiscover = true }: Props) {
   const [folder, setFolder] = useState<Folder>('inbox');
   const [missFilter, setMissFilter] = useState<MissCheck | null>(null);
   const [viaFilter, setViaFilter] = useState<string | null>(null);
@@ -150,8 +153,8 @@ export default function Matches({ matches, feedback, onVerdict, onVerdicts, need
     { key: 'inbox', label: 'Inbox' },
     { key: 'interested', label: '★ Interested' },
     { key: 'not_for_me', label: 'Not for me' },
-    { key: 'near', label: 'Near misses' },
-    { key: 'discover', label: 'Discover' },
+    ...(showNear ? [{ key: 'near' as const, label: 'Near misses' }] : []),
+    ...(showDiscover ? [{ key: 'discover' as const, label: 'Discover' }] : []),
     { key: 'archive', label: 'Archive' },
   ];
 

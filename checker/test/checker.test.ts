@@ -588,6 +588,67 @@ describe("discover", () => {
   });
 });
 
+describe("a quiet search (Discover off, monthly note)", () => {
+  it("Discover off: that person's titles aren't searched, nothing lands in Discover, and no digest is sent", async () => {
+    const { store, sent, mailer } = setup();
+    store.addSource(1, "Board A");
+    store.people_[0].discover_on = false;
+    const reads: string[] = [];
+    const searchDiscover = async (src: { name: string }) => {
+      reads.push(src.name);
+      return { jobs: [], collectionId: "c" };
+    };
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover, now: at(1) });
+    expect(reads).toEqual([]); // nobody has Discover on, so the VC boards aren't read at all
+    expect(store.discoverMatches.get(JOSH)).toEqual([]);
+    expect(sent.filter((e) => e.subject.startsWith("Discover"))).toEqual([]);
+  });
+
+  it("after 30 days without an email, sends one 'still watching' note, then waits another 30", async () => {
+    const { store, sent, mailer } = setup();
+    const day = (d: number) => new Date(at(1).getTime() + d * 86_400_000);
+    for (const p of store.people_) Object.assign(p, { monthly_note: true, quiet_since: at(0).toISOString(), discover_on: false });
+    const fetch = async () => ({ postings: [job("1"), job("2", "Senior Product Manager, Berlin")] });
+    const notes = () => sent.filter((e) => e.subject.includes("still watching"));
+
+    await runCheck({ store, mailer, fetch, now: day(0) }); // the "now watching" summary counts as an email
+    expect(store.people_[0].quiet_since).toBe(day(0).toISOString());
+    await runCheck({ store, mailer, fetch, now: day(29) });
+    expect(notes()).toEqual([]);
+
+    await runCheck({ store, mailer, fetch, now: day(30) });
+    expect(notes().map((e) => e.to)).toEqual(["josh@example.com"]); // Jake watches nothing: no note
+    expect(notes()[0].text).toMatch(/Still checking every hour: Acme\./);
+    expect(notes()[0].text).toMatch(/Can't be checked right now: Corner Store\./);
+    expect(notes()[0].text).toMatch(/Looking for titles containing: /);
+
+    await runCheck({ store, mailer, fetch, now: day(45) });
+    expect(notes()).toHaveLength(1);
+    // Turned off in Settings, or alerts paused: never sent.
+    store.people_[0].monthly_note = false;
+    await runCheck({ store, mailer, fetch, now: day(90) });
+    expect(notes()).toHaveLength(1);
+    Object.assign(store.people_[0], { monthly_note: true, alerts_paused: true });
+    await runCheck({ store, mailer, fetch, now: day(120) });
+    expect(notes()).toHaveLength(1);
+  });
+
+  it("any other email restarts the 30 days", async () => {
+    const { store, sent, mailer } = setup();
+    const day = (d: number) => new Date(at(1).getTime() + d * 86_400_000);
+    Object.assign(store.people_[0], { monthly_note: true, quiet_since: at(0).toISOString(), discover_on: false });
+    let board = [job("1")];
+    const fetch = async () => ({ postings: board });
+    await runCheck({ store, mailer, fetch, now: day(0) });
+    board = [job("1"), job("2")];
+    await runCheck({ store, mailer, fetch, now: day(20) }); // a new match is emailed
+    await runCheck({ store, mailer, fetch, now: day(40) }); // 40 days in, but only 20 since that email
+    expect(sent.filter((e) => e.subject.includes("still watching"))).toEqual([]);
+    await runCheck({ store, mailer, fetch, now: day(50) });
+    expect(sent.filter((e) => e.subject.includes("still watching"))).toHaveLength(1);
+  });
+});
+
 describe("Workday boards", () => {
   // Like a Workday list entry: several places shown only as a count until the job's page is read.
   const wd = (id: string): Posting =>

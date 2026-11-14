@@ -15,6 +15,10 @@ const PROFILE: Profile = {
   alerts_paused: false,
   digest_every: 'daily',
   send_to_jobboard: false,
+  // The demo and the tour show everything; a new account starts with these two off.
+  near_misses_on: true,
+  discover_on: true,
+  monthly_note: true,
   inbox_token: null,
   criteria: {
     titles: { include: ['product manager', 'head of product'], exclude: ['product marketing', 'intern'] },

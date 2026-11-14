@@ -197,3 +197,37 @@ export function healthEmail(to: string, failing: { name: string; error: string; 
     text: failing.map((f) => `${f.name}: ${f.error}`).join("\n"),
   };
 }
+
+/** Where one person's search stands, for the monthly note. */
+export interface QuietStanding {
+  /** Companies being checked hourly, and ones on the list that can't be checked right now. */
+  watching: string[];
+  notChecked: string[];
+  /** Open roles that pass their filters, and ones that failed exactly one. */
+  open: number;
+  nearMisses: number;
+}
+
+/**
+ * The monthly note: sent after 30 days without any email, so silence doesn't look like JobSnipe has
+ * stopped. It says what's being watched and for what, and anything worth a look.
+ */
+export function quietEmail(to: string, s: QuietStanding, titles: string[]): Email {
+  const n = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+  const list = (names: string[]) => names.slice(0, 12).join(", ") + (names.length > 12 ? ` and ${names.length - 12} more` : "");
+  const lines = [
+    `No new role has matched your filters in the last 30 days.`,
+    s.watching.length ? `Still checking every hour: ${list(s.watching)}.` : `No company on your list is being checked right now.`,
+    ...(titles.length ? [`Looking for titles containing: ${titles.slice(0, 8).join(", ")}.`] : [`You haven't set any job titles yet, so nothing can match. Add them in Settings.`]),
+    ...(s.notChecked.length ? [`Can't be checked right now: ${list(s.notChecked)}. Open JobSnipe to fix ${s.notChecked.length === 1 ? "it" : "them"}.`] : []),
+    ...(s.nearMisses ? [`${n(s.nearMisses, "open role")} came close but failed one filter (pay, place, level or age). If that's surprising, your filters may be a little tight: Settings shows which.`] : []),
+    ...(s.open ? [`${n(s.open, "older match", "older matches")} ${s.open === 1 ? "is" : "are"} still open on your list.`] : []),
+  ];
+  const off = `You get this once a month only when nothing else was sent. Turn it off in Settings → "Monthly note".`;
+  return {
+    to,
+    subject: "JobSnipe: still watching, nothing new this month",
+    html: layout("Still watching. Nothing new this month.", `${lines.map((l) => `<p style="font-size:14px;margin:0 0 10px">${esc(l)}</p>`).join("")}<p style="font-size:12px;color:${C.muted};margin:16px 0 0">${esc(off)}</p>`),
+    text: [...lines, "", off, SITE].join("\n"),
+  };
+}
