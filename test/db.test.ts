@@ -343,4 +343,19 @@ describe('database', () => {
     expect((await db.query(`select id from profiles where send_to_jobboard`)).rows).toEqual([{ id: JAKE }]);
     await as(JAKE, `update profiles set send_to_jobboard = false`);
   });
+
+  it('0015: a new account starts with Near misses and Discover off, and can turn them on; accounts from before keep both', async () => {
+    const STEVE = '00000000-0000-0000-0000-00000000005e';
+    await db.exec(`insert into auth.users values ('${STEVE}', 'steve@example.com')`);
+    expect((await db.query(`select near_misses_on, discover_on, monthly_note, quiet_since is not null as dated from profiles where id = '${STEVE}'`)).rows).toEqual([{ near_misses_on: false, discover_on: false, monthly_note: true, dated: true }]);
+    await as(STEVE, `update profiles set discover_on = true, monthly_note = false`);
+    expect((await db.query(`select discover_on, monthly_note from profiles where id = '${STEVE}'`)).rows).toEqual([{ discover_on: true, monthly_note: false }]);
+    // The clock for the monthly note is the checker's to keep.
+    await expect(as(STEVE, `update profiles set quiet_since = now() - interval '1 year'`)).rejects.toThrow(/permission denied/);
+    await db.exec(`delete from auth.users where id = '${STEVE}'`);
+    // Everyone here signed up after the migrations ran, so replay its one line for existing accounts.
+    const keep = migrations.find((m) => m.includes('add column near_misses_on'))!.match(/^update public\.profiles set .*;$/m)![0];
+    await db.exec(`update profiles set discover_on = false where id = '${JAKE}'; ${keep}`);
+    expect((await db.query(`select near_misses_on, discover_on from profiles where id = '${JAKE}'`)).rows).toEqual([{ near_misses_on: true, discover_on: true }]);
+  });
 });

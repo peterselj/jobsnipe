@@ -13,7 +13,7 @@ export interface DataSource {
   removeWatch(watchId: number): Promise<void>;
   /** null = back to the usual filters for this company. */
   setWatchFilters(watchId: number, filters: WatchFilters | null): Promise<void>;
-  saveProfile(patch: Partial<Pick<Profile, 'name' | 'criteria' | 'alerts_paused' | 'digest_every' | 'send_to_jobboard'>>): Promise<void>;
+  saveProfile(patch: Partial<Pick<Profile, 'name' | 'criteria' | 'alerts_paused' | 'digest_every' | 'send_to_jobboard' | 'near_misses_on' | 'discover_on' | 'monthly_note'>>): Promise<void>;
   /** Permanently delete the signed-in account and everything about it. */
   deleteAccount(): Promise<void>;
   /** Starts a check; returns the time to wait for a run after. */
@@ -52,7 +52,7 @@ export class SupabaseSource implements DataSource {
 
   async load(): Promise<Snapshot> {
     const [profile, watches, matches, verdicts, run, discover, sources, emails] = await Promise.all([
-      this.db.from('profiles').select('id, name, email, criteria, alert_mode, alerts_paused, digest_every, send_to_jobboard, inbox_token').eq('id', this.userId).single(),
+      this.db.from('profiles').select('id, name, email, criteria, alert_mode, alerts_paused, digest_every, send_to_jobboard, near_misses_on, discover_on, monthly_note, inbox_token').eq('id', this.userId).single(),
       this.db
         .from('watches')
         .select('id, name, careers_url, note, filters, company_id, companies(ats, board, last_checked_at, last_error, consecutive_failures, open_postings)')
@@ -155,7 +155,7 @@ export class SupabaseSource implements DataSource {
     }
 
     return {
-      profile: { ...profile.data, criteria: profile.data.criteria ?? {}, alerts_paused: !!profile.data.alerts_paused, digest_every: profile.data.digest_every ?? 'daily', send_to_jobboard: !!profile.data.send_to_jobboard },
+      profile: { ...profile.data, criteria: profile.data.criteria ?? {}, alerts_paused: !!profile.data.alerts_paused, digest_every: profile.data.digest_every ?? 'daily', send_to_jobboard: !!profile.data.send_to_jobboard, near_misses_on: !!profile.data.near_misses_on, discover_on: !!profile.data.discover_on, monthly_note: !!profile.data.monthly_note },
       watches: ws,
       matches: [...ms, ...found],
       discoverSources: (sources.data ?? [])
@@ -231,7 +231,7 @@ export class SupabaseSource implements DataSource {
     fail('Saving company filters', error);
   }
 
-  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'criteria' | 'alerts_paused' | 'digest_every' | 'send_to_jobboard'>>) {
+  async saveProfile(patch: Partial<Pick<Profile, 'name' | 'criteria' | 'alerts_paused' | 'digest_every' | 'send_to_jobboard' | 'near_misses_on' | 'discover_on' | 'monthly_note'>>) {
     const { error } = await this.db.from('profiles').update(patch).eq('id', this.userId);
     fail('Saving settings', error);
   }

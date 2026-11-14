@@ -134,6 +134,8 @@ export interface DiscoverOptions {
   lookupPay?: LookupPay;
   /** Roles people already handled, to flag reposts (and leave them out of the digest). */
   handled?: Handled;
+  /** Filled with whoever was emailed in this run. */
+  heard?: Set<string>;
   log?: (msg: string) => void;
   redact: (s: string) => string;
 }
@@ -146,7 +148,8 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
   const out = { boards: 0, emails: 0, errors: [] as string[] };
 
   const filters = new Map<string, Filters>(o.people.map((p) => [p.id, toFilters(p.criteria)]));
-  const searchers = o.people.filter((p) => filters.get(p.id)!.titles.include.length);
+  // Discover is opt-in: only people who turned it on have their titles searched on the VC boards.
+  const searchers = o.people.filter((p) => p.discover_on !== false && filters.get(p.id)!.titles.include.length);
   // Each title is searched on every VC board, so one person's list can't add more than a dozen.
   const queries = [...new Set(searchers.flatMap((p) => filters.get(p.id)!.titles.include.slice(0, MAX_TITLE_SEARCHES)))];
 
@@ -257,7 +260,8 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
           })
           .filter(({ r }) => r.pass);
     const listed = all.filter((x) => x.onList);
-    const passing = all.filter((x) => !x.onList);
+    // With Discover off, only emailed jobs at companies on your list are kept (they go to the Inbox).
+    const passing = person.discover_on === false ? [] : all.filter((x) => !x.onList);
     dedupe(passing);
     await store.syncDiscoverMatches(person.id, [
       ...listed.map(({ j, r }) => ({ posting_id: j.id, where_label: r.where ?? null, flags: r.flags, on_list: true })),
@@ -270,13 +274,16 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
         if (!person.alerts_paused && !r.flags.includes(REPOST_FLAG)) await o.mailer.send(matchEmail(person.email, { ...asPosting(j), company: `${j.company} (${j.via.join(", ")})` }, r, now));
         alerted.add(key);
         newAlerts.push({ profile_id: person.id, posting_id: j.id });
-        if (!person.alerts_paused) out.emails++;
+        if (!person.alerts_paused) {
+          out.emails++;
+          o.heard?.add(person.id);
+        }
       } catch (e) {
         out.errors.push(`match email failed: ${o.redact(e instanceof Error ? e.message : String(e))}`);
       }
     }
 
-    if (!digestDue(person, now)) continue;
+    if (person.discover_on === false || !digestDue(person, now)) continue;
     const since = person.last_digest_at ? Date.parse(person.last_digest_at) : 0;
     const fresh = passing
       .filter(({ j, r }) => Date.parse(j.firstSeenAt ?? iso) > since && !r.flags.includes(REPOST_FLAG))
@@ -286,6 +293,7 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
       if (fresh.length && !person.alerts_paused) {
         await o.mailer.send(digestEmail(person.email, fresh, person.digest_every ?? "daily", now, DIGEST_MAX));
         out.emails++;
+        o.heard?.add(person.id);
         log(`  ✉ discover digest sent (${fresh.length} roles)`);
       }
       await store.markDigested(person.id, iso);

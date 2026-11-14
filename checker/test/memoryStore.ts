@@ -113,4 +113,7 @@ export class MemoryStore implements Store {
   async markDigested(profileId: string, at: string) {
     this.people_.find((p) => p.id === profileId)!.last_digest_at = at;
   }
+  async markHeard(profileIds: string[], at: string) {
+    for (const p of this.people_) if (profileIds.includes(p.id)) p.quiet_since = at;
+  }
 }

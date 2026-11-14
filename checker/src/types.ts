@@ -24,6 +24,12 @@ export interface Person {
   /** How often the Discover digest comes ("never" = page only), and when the last one went. */
   digest_every?: "daily" | "weekly" | "biweekly" | "never";
   last_digest_at?: string | null;
+  /** Discover is opt-in for new accounts: false = no VC-board roles and no digest for this person. */
+  discover_on?: boolean;
+  /** Wants a "still watching, nothing new" note after 30 days without an email from JobSnipe. */
+  monthly_note?: boolean;
+  /** When JobSnipe last emailed this person (or when they joined). */
+  quiet_since?: string | null;
 }
 
 /** A posting as normalized from any ATS. */

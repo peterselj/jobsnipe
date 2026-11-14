@@ -41,7 +41,7 @@ function missedPlaces(nearMisses: Match[]): [string, number][] {
 }
 
 /** Name, alert email, filters, pausing, and deleting the account. Saving re-checks right away. */
-export default function Settings({ profile, nearMisses, discoverRoles, discoverSources, inboxEmails, suggestions, jobBoard, onSave, onPause, onDigest, onInbox, onJobBoard, onAcceptSuggestion, onDismissSuggestion, onDelete, onCancel }: {
+export default function Settings({ profile, nearMisses, discoverRoles, discoverSources, inboxEmails, suggestions, jobBoard, onSave, onPause, onShow, onDigest, onInbox, onJobBoard, onAcceptSuggestion, onDismissSuggestion, onDelete, onCancel }: {
   profile: Profile;
   /** Roles in Discover right now, for suggesting industries and stages to skip. */
   discoverRoles: Match[];
@@ -60,6 +60,8 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
   nearMisses: Match[];
   onSave: (patch: Pick<Profile, 'name' | 'email' | 'criteria'>) => Promise<void>;
   onPause: (paused: boolean) => Promise<void>;
+  /** Turn an optional part of JobSnipe on or off. */
+  onShow: (patch: Partial<Pick<Profile, 'near_misses_on' | 'discover_on' | 'monthly_note'>>) => Promise<void>;
   onDelete: () => Promise<void>;
   onCancel: () => void;
 }) {
@@ -145,8 +147,9 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
     <div className="mx-auto max-w-2xl space-y-5">
       {suggestions.length > 0 && <SuggestionsCard suggestions={suggestions} onAccept={onAcceptSuggestion} onDismiss={onDismissSuggestion} />}
       <PauseCard paused={profile.alerts_paused} onPause={onPause} />
-      <DigestCard every={profile.digest_every} sources={discoverSources} onChange={onDigest} />
-      <InboxCard token={profile.inbox_token ?? null} emails={inboxEmails} onSet={onInbox} />
+      <ExtrasCard profile={profile} onShow={onShow} />
+      {profile.discover_on && <DigestCard every={profile.digest_every} sources={discoverSources} onChange={onDigest} />}
+      {profile.discover_on && <InboxCard token={profile.inbox_token ?? null} emails={inboxEmails} onSet={onInbox} />}
       <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-white p-5">
         <div className="min-w-0 flex-1">
           <div className="text-sm font-bold">Send to JobBoard is {jobBoard ? 'on' : 'off'}</div>
@@ -172,7 +175,7 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
       <div className={card} data-tour="filters">
         <SectionHeader title="Job titles" />
         <div className="space-y-3">
-          <Field label="Titles containing any of" hint="Comma-separated, any case. Example: product manager, head of product">
+          <Field label="Titles containing any of" hint="Comma-separated, any case. Punctuation in job titles is ignored, so “vp product” also matches “VP, Product”. Example: product manager, head of product">
             <Input value={include} onChange={(e) => setInclude(e.target.value)} placeholder="product manager, account manager" />
           </Field>
           {tooBroadTitles(toList(include)).map((word) => (
@@ -197,7 +200,7 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
             </div>
           )}
           {missing('seniority').length > 0 && (
-            <p className={hint}>Senior-and-up is hiding {missing('seniority').length} open role{missing('seniority').length > 1 ? 's' : ''} that otherwise fit. See them under Near misses.</p>
+            <p className={hint}>Senior-and-up is hiding {missing('seniority').length} open role{missing('seniority').length > 1 ? 's' : ''} that otherwise fit. {profile.near_misses_on ? 'See them under Near misses.' : 'Turn on Near misses above to see them.'}</p>
           )}
         </div>
       </div>
@@ -267,18 +270,18 @@ export default function Settings({ profile, nearMisses, discoverRoles, discoverS
       <div className={card}>
         <SectionHeader title="Freshness" />
         <p className="mb-3 text-sm text-muted">
-          Roles left up for months are usually evergreen listings or long since filled. Older ones skip your inbox and
-          show under Near misses instead.
+          Roles left up for months are usually evergreen listings or long since filled. Older ones skip your inbox
+          {profile.near_misses_on ? ' and show under Near misses instead' : ''}.
         </p>
         <Field label="Skip roles posted more than this many days ago" hint="Leave blank for any age.">
           <Input className="max-w-[160px]" inputMode="numeric" value={maxAge} onChange={(e) => setMaxAge(e.target.value)} placeholder="60" />
         </Field>
         {missing('age').length > 0 && (
-          <p className={hint}>Your limit is hiding {missing('age').length} open role{missing('age').length > 1 ? 's' : ''} that otherwise fit. See them under Near misses → Age.</p>
+          <p className={hint}>Your limit is hiding {missing('age').length} open role{missing('age').length > 1 ? 's' : ''} that otherwise fit. {profile.near_misses_on ? 'See them under Near misses → Age.' : 'Turn on Near misses above to see them.'}</p>
         )}
       </div>
 
-      <div className={card}>
+      <div className={card} hidden={!profile.discover_on}>
         <SectionHeader title="Discover filters" />
         <p className="mb-3 text-sm text-muted">
           Only for the Discover tab and its digest: skip whole kinds of company, using what the VC boards say about each one.
@@ -379,6 +382,61 @@ function SuggestionsCard({ suggestions, onAccept, onDismiss }: { suggestions: Su
             </div>
           </li>
         ))}
+      </ul>
+    </div>
+  );
+}
+
+/** The optional parts: a new account starts with just the inbox, and adds these when wanted. */
+function ExtrasCard({ profile, onShow }: { profile: Profile; onShow: (patch: Partial<Pick<Profile, 'near_misses_on' | 'discover_on' | 'monthly_note'>>) => Promise<void> }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const rows = [
+    {
+      key: 'near_misses_on' as const,
+      title: 'Near misses',
+      text: 'A tab of roles in your job family that failed exactly one filter (pay, place, level or age), so you can tell when a filter is too tight. Never emailed.',
+    },
+    {
+      key: 'discover_on' as const,
+      title: 'Discover',
+      text: 'Roles that pass all your filters at companies not on your list, from venture-capital job boards and your own job-alert emails. They come as a digest, never one email each.',
+    },
+    {
+      key: 'monthly_note' as const,
+      title: 'Monthly note',
+      text: 'If a month goes by with no email from JobSnipe, a short one saying it is still watching and what for. Skipped whenever anything else was sent.',
+    },
+  ];
+  return (
+    <div className="rounded-xl border border-line bg-white p-5" data-tour="extras">
+      <SectionHeader title="Extras" />
+      <p className="mb-3 text-sm text-muted">JobSnipe always emails you about new roles at the companies on your list. These are optional.</p>
+      <ul className="divide-y divide-line">
+        {rows.map((r) => {
+          const on = profile[r.key];
+          return (
+            <li key={r.key} className="flex flex-wrap items-center gap-3 py-3 first:pt-0 last:pb-0">
+              <div className="min-w-0 flex-1 basis-60">
+                <div className="text-sm font-bold">{r.title} {on ? 'is on' : 'is off'}</div>
+                <p className="text-sm text-muted">{r.text}</p>
+              </div>
+              <Button
+                variant="secondary"
+                disabled={busy !== null}
+                onClick={async () => {
+                  setBusy(r.key);
+                  try {
+                    await onShow({ [r.key]: !on });
+                  } finally {
+                    setBusy(null);
+                  }
+                }}
+              >
+                {busy === r.key ? 'Saving…' : on ? 'Turn off' : 'Turn on'}
+              </Button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

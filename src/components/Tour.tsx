@@ -94,7 +94,7 @@ const STEPS: Step[] = [
     view: 'matches',
     target: FIRST_ROLE,
     title: 'Near misses',
-    body: <>These are in your job family but failed {b('exactly one')} filter: the pay was a little low, the place was off, the posting was old. Each says which. If one is worth it anyway, star it, and you'll see what that filter is costing you.</>,
+    body: <>These are in your job family but failed {b('exactly one')} filter: the pay was a little low, the place was off, the posting was old. Each says which. If one is worth it anyway, star it, and you'll see what that filter is costing you. This tab is optional: a new account turns it on in Settings.</>,
   },
   {
     id: 'tab-discover',
@@ -109,7 +109,7 @@ const STEPS: Step[] = [
     view: 'matches',
     target: FIRST_ROLE,
     title: 'Discover',
-    body: <>Roles that pass all your filters at companies {b('not')} on your list, found on venture-capital job boards and in your own job-alert emails (LinkedIn, Indeed and others). These come as a digest, daily or weekly, never one email each. Like a company? {b('+ Watch company')} adds it to your list.</>,
+    body: <>Roles that pass all your filters at companies {b('not')} on your list, found on venture-capital job boards and in your own job-alert emails (LinkedIn, Indeed and others). These come as a digest, daily or weekly, never one email each. Like a company? {b('+ Watch company')} adds it to your list. Discover is optional too, and off until you turn it on.</>,
   },
   {
     id: 'add-role',
