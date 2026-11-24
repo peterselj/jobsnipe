@@ -131,6 +131,11 @@ export interface Store {
 
 const DAY = 86_400_000;
 const PAGE = 1000; // Supabase returns at most 1000 rows per request
+const ID_BATCH = 100; // ids go in the request URL, so filter and update in modest batches
+
+function* batches<T>(items: T[], size = ID_BATCH): Generator<T[]> {
+  for (let i = 0; i < items.length; i += size) yield items.slice(i, i + size);
+}
 
 function postingRow(companyId: number, p: Posting, at: string) {
   return {
@@ -195,8 +200,13 @@ export class SupabaseStore implements Store {
   }
 
   async companies(ids: number[]) {
-    if (!ids.length) return [];
-    return this.check(await this.db.from("companies").select("*").in("id", ids), "load companies") as CompanyRow[];
+    // One request with every id would be cut off at PAGE rows (and an over-long URL), leaving
+    // watched boards missing from the run.
+    const out: CompanyRow[] = [];
+    for (const batch of batches(ids)) {
+      out.push(...(await this.all<CompanyRow>("load companies", (a, b) => this.db.from("companies").select("*").in("id", batch).order("id").range(a, b))));
+    }
+    return out;
   }
 
   async updateCompany(id: number, patch: Partial<CompanyRow>) {
@@ -216,10 +226,9 @@ export class SupabaseStore implements Store {
     for (let i = 0; i < ch.added.length; i += 500) {
       this.check(await this.db.from("postings").insert(ch.added.slice(i, i + 500).map((p) => postingRow(company.id, p, at))), "save new postings");
     }
-    // Ids go in the request URL, so update in modest batches.
     for (const [ids, closed_at] of [[ch.reopened, null], [ch.closed, at]] as const) {
-      for (let i = 0; i < ids.length; i += 100) {
-        this.check(await this.db.from("postings").update({ closed_at }).in("id", ids.slice(i, i + 100)), "mark postings");
+      for (const batch of batches([...ids])) {
+        this.check(await this.db.from("postings").update({ closed_at }).in("id", batch), "mark postings");
       }
     }
     for (const { id, comp, locations, workplace } of ch.priced) {
@@ -270,7 +279,9 @@ export class SupabaseStore implements Store {
 
   async markBaselined(watchIds: number[], at: string) {
     if (!watchIds.length) return;
-    this.check(await this.db.from("watches").update({ baselined_at: at }).in("id", watchIds), "mark watches");
+    for (const batch of batches(watchIds)) {
+      this.check(await this.db.from("watches").update({ baselined_at: at }).in("id", batch), "mark watches");
+    }
   }
 
   async syncMatches(profileId: string, rows: MatchRow[]) {
@@ -352,6 +363,8 @@ export class SupabaseStore implements Store {
 
   async markHeard(profileIds: string[], at: string) {
     if (!profileIds.length) return;
-    this.check(await this.db.from("profiles").update({ quiet_since: at }).in("id", profileIds), "mark people emailed");
+    for (const batch of batches(profileIds)) {
+      this.check(await this.db.from("profiles").update({ quiet_since: at }).in("id", batch), "mark people emailed");
+    }
   }
 }
