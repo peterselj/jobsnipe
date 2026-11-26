@@ -358,4 +358,19 @@ describe('database', () => {
     await db.exec(`update profiles set discover_on = false where id = '${JAKE}'; ${keep}`);
     expect((await db.query(`select near_misses_on, discover_on from profiles where id = '${JAKE}'`)).rows).toEqual([{ near_misses_on: true, discover_on: true }]);
   });
+
+  it('0016: the lookups that had no index have one, and the migration can be run twice', async () => {
+    const want = [
+      ['matches_posting_idx', '(posting_id)'],
+      ['discover_matches_posting_idx', '(posting_id)'],
+      ['inbound_emails_profile_received_idx', '(profile_id, received_at)'],
+      ['check_requests_by_at_idx', '(requested_by, requested_at)'],
+      ['alerts_sent_idx', '(sent_at)'],
+    ];
+    const rows = (await db.query<{ indexname: string; indexdef: string }>(`select indexname, indexdef from pg_indexes where schemaname = 'public'`)).rows;
+    for (const [name, cols] of want) {
+      expect(rows.find((r) => r.indexname === name)?.indexdef, name).toContain(cols);
+    }
+    await db.exec(migrations.find((m) => m.includes('matches_posting_idx'))!);
+  });
 });
