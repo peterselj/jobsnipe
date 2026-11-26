@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makeMailer, type Email, type Mailer } from "../src/email.js";
 import { evaluate, titleCheck, toFilters } from "../src/filters.js";
 import { htmlToText, parseCompText } from "../src/normalize.js";
-import { runCheck as realRunCheck, type RunOptions } from "../src/run.js";
+import { backupNotNeeded, runCheck as realRunCheck, type RunOptions } from "../src/run.js";
 import { HttpError } from "../src/ats/http.js";
 import type { DiscoverJob } from "../src/discover/types.js";
 import type { Criteria, Posting } from "../src/types.js";
@@ -695,5 +695,44 @@ describe("Workday boards", () => {
     board = { postings: [wd("2")] };
     await runCheck({ store, mailer, fetch, fetchDetails, now: at(4) });
     expect(store.postings.get("workday:acme:1")!.closed).toBe(true);
+  });
+});
+
+describe("the backup schedule", () => {
+  const min = (m: number) => new Date(at(1).getTime() + m * 60_000);
+  const finishedAt = (when: Date) => {
+    const { store, mailer } = setup();
+    store.clock = () => when.toISOString();
+    return { store, mailer };
+  };
+
+  it("has nothing to do when a run finished in the last 70 minutes", async () => {
+    const { store, mailer } = finishedAt(at(1));
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [job("1")] }), now: at(1), trigger: "schedule" });
+    expect(await backupNotNeeded(store, "backup schedule", min(30))).toBe(true);
+    expect(await backupNotNeeded(store, "backup schedule", min(69))).toBe(true);
+  });
+
+  it("runs when the hourly timer has gone quiet, or has never run", async () => {
+    const { store, mailer } = finishedAt(at(1));
+    expect(await backupNotNeeded(store, "backup schedule", at(1))).toBe(false); // no run yet
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [job("1")] }), now: at(1), trigger: "schedule" });
+    expect(await backupNotNeeded(store, "backup schedule", min(71))).toBe(false);
+    expect(await backupNotNeeded(store, "backup schedule", min(180))).toBe(false);
+  });
+
+  it("never holds back the hourly timer or Check now, and doesn't count a run that never finished", async () => {
+    const { store, mailer } = finishedAt(at(1));
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [job("1")] }), now: at(1), trigger: "schedule" });
+    for (const trigger of ["schedule", "check now", "manual"]) expect(await backupNotNeeded(store, trigger, min(5))).toBe(false);
+
+    const crashed = new MemoryStore();
+    await crashed.startRun("schedule"); // started, then the job died
+    expect(await backupNotNeeded(crashed, "backup schedule", new Date())).toBe(false);
+  });
+
+  it("runs anyway if it can't read the run history", async () => {
+    const broken = { lastRunFinishedAt: async () => { throw new Error("database unreachable"); } };
+    expect(await backupNotNeeded(broken, "backup schedule", at(1))).toBe(false);
   });
 });

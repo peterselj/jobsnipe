@@ -92,6 +92,8 @@ export interface RunSummary {
 export interface Store {
   startRun(trigger: string): Promise<number>;
   finishRun(id: number, s: RunSummary): Promise<void>;
+  /** When the most recent completed run finished (null: none has yet). */
+  lastRunFinishedAt(): Promise<string | null>;
   people(): Promise<Person[]>;
   watches(): Promise<WatchRow[]>;
   companies(ids: number[]): Promise<CompanyRow[]>;
@@ -187,6 +189,14 @@ export class SupabaseStore implements Store {
 
   async finishRun(id: number, s: RunSummary) {
     this.check(await this.db.from("runs").update({ ...s, finished_at: new Date().toISOString() }).eq("id", id), "finish run");
+  }
+
+  async lastRunFinishedAt() {
+    const rows = this.check(
+      await this.db.from("runs").select("finished_at").not("finished_at", "is", null).order("finished_at", { ascending: false }).limit(1),
+      "load last run",
+    ) as { finished_at: string }[] | null;
+    return rows?.[0]?.finished_at ?? null;
   }
 
   async people() {

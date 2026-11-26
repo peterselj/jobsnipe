@@ -21,6 +21,28 @@ export function quietNoteDue(person: Pick<Person, "monthly_note" | "alerts_pause
   return now.getTime() - Date.parse(person.quiet_since) >= QUIET_NOTE_AFTER_DAYS * 86_400_000;
 }
 
+/** What .github/workflows/check.yml passes as the trigger when GitHub's own schedule starts a run. */
+export const BACKUP_TRIGGER = "backup schedule";
+
+/** The hourly timer is working if a run finished this recently (an hour, plus slack for a slow run). */
+export const BACKUP_SKIP_WITHIN_MINUTES = 70;
+
+/**
+ * GitHub's schedule is only there in case the hourly timer (Supabase) stops. When a run finished
+ * in the last 70 minutes the timer is fine, so the backup has nothing to do: a full check would
+ * re-download every board that can't answer "unchanged" (Workday, SmartRecruiters) for no reason.
+ * If the lookup itself fails, the backup runs: better an extra check than a missed one.
+ */
+export async function backupNotNeeded(store: Pick<Store, "lastRunFinishedAt">, trigger: string, now = new Date()): Promise<boolean> {
+  if (trigger !== BACKUP_TRIGGER) return false;
+  try {
+    const last = await store.lastRunFinishedAt();
+    return !!last && now.getTime() - Date.parse(last) < BACKUP_SKIP_WITHIN_MINUTES * 60_000;
+  } catch {
+    return false;
+  }
+}
+
 /** Cap on per-posting detail lookups per board per run, so a big new watcher can't stall a run. */
 export const MAX_PAY_LOOKUPS = 40;
 

@@ -2,6 +2,7 @@ name: Check job boards
 
 # Started hourly by Supabase (pg_cron → dispatch_check) and by the page's "Check now".
 # GitHub's own schedule is only a backup: it skipped most runs when it was the main timer.
+# A backup run exits straight away if another run finished in the last 70 minutes (checker/src/cli.ts).
 on:
   workflow_dispatch:
     inputs:
