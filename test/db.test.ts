@@ -373,4 +373,11 @@ describe('database', () => {
     }
     await db.exec(migrations.find((m) => m.includes('matches_posting_idx'))!);
   });
+
+  it("0017: each watch remembers its own broken-board email, and only the checker can set it", async () => {
+    await expect(as(JOSH, `update watches set failure_alerted_at = now()`)).rejects.toThrow(/permission denied/);
+    await db.exec(`update watches set failure_alerted_at = now() where profile_id = '${JOSH}'`);
+    expect((await db.query(`select count(*)::int as n from watches where failure_alerted_at is not null and profile_id <> '${JOSH}'`)).rows).toEqual([{ n: 0 }]);
+    await db.exec(migrations.find((m) => m.includes('failure_alerted_at'))!); // safe to run twice
+  });
 });

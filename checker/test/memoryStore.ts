@@ -84,6 +84,9 @@ export class MemoryStore implements Store {
   async markBaselined(ids: number[], at: string) {
     for (const w of this.watches_) if (ids.includes(w.id)) w.baselined_at = at;
   }
+  async markFailureAlerted(ids: number[], at: string) {
+    for (const w of this.watches_) if (ids.includes(w.id)) w.failure_alerted_at = at;
+  }
   async syncMatches(profileId: string, rows: MatchRow[]) {
     this.matches.set(profileId, rows);
   }
