@@ -38,6 +38,26 @@ function status(c: any): Watch['status'] {
   return c.consecutive_failures > 0 ? 'failing' : 'ok';
 }
 
+/** Supabase returns at most this many rows per request, whatever limit is asked for. */
+export const PAGE = 1000;
+
+type Rows<T> = { data: T[] | null; error: { message: string } | null };
+
+/**
+ * Read every row of a query, a page at a time. The query must have a fixed order, or rows could be
+ * skipped or repeated between pages. Returns the same { data, error } shape as a single request.
+ */
+export async function allRows<T = any>(page: (from: number, to: number) => PromiseLike<Rows<T>>): Promise<Rows<T>> {
+  const data: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const res = await page(from, from + PAGE - 1);
+    if (res.error) return { data: null, error: res.error };
+    const rows = res.data ?? [];
+    data.push(...rows);
+    if (rows.length < PAGE) return { data, error: null };
+  }
+}
+
 const toRun = (r: any): Run => ({
   startedAt: r.started_at,
   finishedAt: r.finished_at ?? undefined,
@@ -57,16 +77,24 @@ export class SupabaseSource implements DataSource {
         .from('watches')
         .select('id, name, careers_url, note, filters, company_id, companies(ats, board, last_checked_at, last_error, consecutive_failures, open_postings)')
         .order('created_at'),
-      this.db
-        .from('matches')
-        .select('where_label, flags, near_miss, miss_detail, postings(id, company_id, title, url, ats_posted_at, comp_min, comp_max, comp_currency, first_seen_at)')
-        .limit(2000),
-      this.db.from('verdicts').select('*').limit(5000),
+      // These three are paged: one request stops at 1000 rows, and a decision that isn't loaded puts
+      // its role back in the Inbox (the Inbox is "matches with no decision").
+      allRows((a, b) =>
+        this.db
+          .from('matches')
+          .select('where_label, flags, near_miss, miss_detail, postings(id, company_id, title, url, ats_posted_at, comp_min, comp_max, comp_currency, first_seen_at)')
+          .order('posting_id')
+          .range(a, b),
+      ),
+      allRows((a, b) => this.db.from('verdicts').select('*').order('posting_id').range(a, b)),
       this.latestRun(),
-      this.db
-        .from('discover_matches')
-        .select('where_label, flags, on_list, discover_postings(id, company, title, url, posted_at, comp_min, comp_max, comp_currency, ats, board, via, stage, industries, first_seen_at)')
-        .limit(2000),
+      allRows((a, b) =>
+        this.db
+          .from('discover_matches')
+          .select('where_label, flags, on_list, discover_postings(id, company, title, url, posted_at, comp_min, comp_max, comp_currency, ats, board, via, stage, industries, first_seen_at)')
+          .order('posting_id')
+          .range(a, b),
+      ),
       this.db.from('discover_sources').select('name, host, last_ok_at, last_error, enabled').order('id'),
       this.db.from('inbound_emails').select('id, from_name, from_address, subject, received_at, jobs_found, text_body').order('received_at', { ascending: false }).limit(10),
     ]);
