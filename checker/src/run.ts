@@ -21,6 +21,28 @@ export function quietNoteDue(person: Pick<Person, "monthly_note" | "alerts_pause
   return now.getTime() - Date.parse(person.quiet_since) >= QUIET_NOTE_AFTER_DAYS * 86_400_000;
 }
 
+/** What .github/workflows/check.yml passes as the trigger when GitHub's own schedule starts a run. */
+export const BACKUP_TRIGGER = "backup schedule";
+
+/** The hourly timer is working if a run finished this recently (an hour, plus slack for a slow run). */
+export const BACKUP_SKIP_WITHIN_MINUTES = 70;
+
+/**
+ * GitHub's schedule is only there in case the hourly timer (Supabase) stops. When a run finished
+ * in the last 70 minutes the timer is fine, so the backup has nothing to do: a full check would
+ * re-download every board that can't answer "unchanged" (Workday, SmartRecruiters) for no reason.
+ * If the lookup itself fails, the backup runs: better an extra check than a missed one.
+ */
+export async function backupNotNeeded(store: Pick<Store, "lastRunFinishedAt">, trigger: string, now = new Date()): Promise<boolean> {
+  if (trigger !== BACKUP_TRIGGER) return false;
+  try {
+    const last = await store.lastRunFinishedAt();
+    return !!last && now.getTime() - Date.parse(last) < BACKUP_SKIP_WITHIN_MINUTES * 60_000;
+  } catch {
+    return false;
+  }
+}
+
 /** Cap on per-posting detail lookups per board per run, so a big new watcher can't stall a run. */
 export const MAX_PAY_LOOKUPS = 40;
 
@@ -125,67 +147,77 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
     };
     const open = new Map<number, StoredPosting[]>();
     for (const c of companies.values()) {
-      const result = fetched.get(c.id);
-      const changes: PostingChanges = { added: [], reopened: [], closed: [], priced: [] };
-      let postings: StoredPosting[];
-      let known: Map<string, KnownPosting> | undefined;
-      if (!result || result.unchanged) {
-        postings = await store.openPostings(c);
-      } else {
-        known = await store.knownPostings(c);
-        const current = new Set(result.postings.map((p) => p.id));
-        postings = result.postings.map((p) => {
-          const k = known!.get(p.id);
-          if (!k) return { ...p, atsPostedAt: publishedAt(p.atsPostedAt, lastOk.get(c.id) ?? null, iso), companyId: c.id, firstSeenAt: iso };
-          // Places already read from the posting's own page beat the list's stand-in.
-          const placesKnown = p.locationsFromDetails && k.compChecked && !!k.locations?.length;
-          return {
-            ...p,
-            atsPostedAt: k.atsPostedAt ?? p.atsPostedAt,
-            comp: p.comp ?? k.comp,
-            compChecked: p.compChecked || k.compChecked,
-            ...(placesKnown ? { locations: k.locations!, workplace: k.workplace ?? p.workplace } : {}),
-            companyId: c.id,
-            firstSeenAt: k.firstSeenAt,
-          };
-        });
-        changes.reopened = [...known].filter(([id, k]) => k.closed && current.has(id)).map(([id]) => id);
-        // A board too big to read in full can't tell us what closed.
-        if (!result.partial) changes.closed = [...known].filter(([id, k]) => !k.closed && !current.has(id)).map(([id]) => id);
-      }
-
-      const watchers = watches.filter((w) => w.company_id === c.id).map(filtersFor).filter((f): f is Filters => !!f);
-      const needPay = postings
-        .filter((p) => p.compChecked === false && watchers.some((f) => !titleCheck(p.title, f)))
-        .slice(0, MAX_PAY_LOOKUPS);
-      const placesRead = new Set<string>();
-      await mapLimit(needPay, 4, async (p) => {
-        try {
-          const d = await fetchDetails(c.ats, c.board, p);
-          p.comp = d.comp;
-          if (d.locations?.length) {
-            p.locations = d.locations;
-            placesRead.add(p.id);
-          }
-          if (d.workplace) p.workplace = d.workplace;
-          p.compChecked = true;
-        } catch {
-          // Left unchecked so the next run tries again; meanwhile it shows as "no pay range listed".
+      try {
+        const result = fetched.get(c.id);
+        const changes: PostingChanges = { added: [], reopened: [], closed: [], priced: [] };
+        let postings: StoredPosting[];
+        let known: Map<string, KnownPosting> | undefined;
+        if (!result || result.unchanged) {
+          postings = await store.openPostings(c);
+        } else {
+          known = await store.knownPostings(c);
+          const current = new Set(result.postings.map((p) => p.id));
+          postings = result.postings.map((p) => {
+            const k = known!.get(p.id);
+            if (!k) return { ...p, atsPostedAt: publishedAt(p.atsPostedAt, lastOk.get(c.id) ?? null, iso), companyId: c.id, firstSeenAt: iso };
+            // Places already read from the posting's own page beat the list's stand-in.
+            const placesKnown = p.locationsFromDetails && k.compChecked && !!k.locations?.length;
+            return {
+              ...p,
+              atsPostedAt: k.atsPostedAt ?? p.atsPostedAt,
+              comp: p.comp ?? k.comp,
+              compChecked: p.compChecked || k.compChecked,
+              ...(placesKnown ? { locations: k.locations!, workplace: k.workplace ?? p.workplace } : {}),
+              companyId: c.id,
+              firstSeenAt: k.firstSeenAt,
+            };
+          });
+          changes.reopened = [...known].filter(([id, k]) => k.closed && current.has(id)).map(([id]) => id);
+          // A board too big to read in full can't tell us what closed.
+          if (!result.partial) changes.closed = [...known].filter(([id, k]) => !k.closed && !current.has(id)).map(([id]) => id);
         }
-      });
 
-      // New postings are saved with their pay; stored ones get just the pay update.
-      changes.added = known ? postings.filter((p) => !known!.has(p.id)) : [];
-      changes.priced = needPay
-        .filter((p) => p.compChecked && (!known || known.has(p.id)))
-        .map((p) => ({ id: p.id, comp: p.comp, ...(placesRead.has(p.id) ? { locations: p.locations, workplace: p.workplace } : {}) }));
-      if (changes.added.length + changes.reopened.length + changes.closed.length + changes.priced.length) {
-        await store.applyPostingChanges(c, changes, iso);
+        const watchers = watches.filter((w) => w.company_id === c.id).map(filtersFor).filter((f): f is Filters => !!f);
+        const needPay = postings
+          .filter((p) => p.compChecked === false && watchers.some((f) => !titleCheck(p.title, f)))
+          .slice(0, MAX_PAY_LOOKUPS);
+        const placesRead = new Set<string>();
+        await mapLimit(needPay, 4, async (p) => {
+          try {
+            const d = await fetchDetails(c.ats, c.board, p);
+            p.comp = d.comp;
+            if (d.locations?.length) {
+              p.locations = d.locations;
+              placesRead.add(p.id);
+            }
+            if (d.workplace) p.workplace = d.workplace;
+            p.compChecked = true;
+          } catch {
+            // Left unchecked so the next run tries again; meanwhile it shows as "no pay range listed".
+          }
+        });
+
+        // New postings are saved with their pay; stored ones get just the pay update.
+        changes.added = known ? postings.filter((p) => !known!.has(p.id)) : [];
+        changes.priced = needPay
+          .filter((p) => p.compChecked && (!known || known.has(p.id)))
+          .map((p) => ({ id: p.id, comp: p.comp, ...(placesRead.has(p.id) ? { locations: p.locations, workplace: p.workplace } : {}) }));
+        if (changes.added.length + changes.reopened.length + changes.closed.length + changes.priced.length) {
+          await store.applyPostingChanges(c, changes, iso);
+        }
+        // Only remember the version tag once its changes are saved, or a crash could skip them for good.
+        if (result && !result.unchanged && result.etag !== c.etag) await store.updateCompany(c.id, { etag: result.etag ?? null });
+        summary.new_postings += changes.added.length;
+        open.set(c.id, postings);
+      } catch (e) {
+        // The database refused something for this one board. Everyone else's boards carry on; this
+        // one counts as not checked this hour (no emails from it), shows what's already stored, and
+        // is read again in full next run because its version tag wasn't saved.
+        summary.errors.push(`board #${c.id}: saving changes failed: ${redact(msg(e))}`);
+        log(`✕ board #${c.id}: saving changes failed: ${redact(msg(e))}`);
+        fetched.delete(c.id);
+        open.set(c.id, await store.openPostings(c).catch(() => []));
       }
-      // Only remember the version tag once its changes are saved, or a crash could skip them for good.
-      if (result && !result.unchanged && result.etag !== c.etag) await store.updateCompany(c.id, { etag: result.etag ?? null });
-      summary.new_postings += changes.added.length;
-      open.set(c.id, postings);
     }
 
     // 3. Per person: matches for the page, a summary for newly watched companies, an email per new match.
@@ -299,28 +331,36 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
       await store.recordAlerts(newAlerts);
     }
 
-    // 4. Broken boards: one email per failure streak, to everyone watching.
-    const failing = [...companies.values()].filter((c) => c.consecutive_failures >= FAILURE_ALERT_AFTER && !c.failure_alert_sent);
-    if (failing.length) {
-      let allSent = true;
+    // 4. Broken boards: one email per failure streak, to everyone watching. Each person's email is
+    //    remembered on their own watch as soon as it's sent, so a send that fails for one person is
+    //    retried next hour for that person only, not sent again to everyone it already reached.
+    const failing = new Map([...companies.values()].filter((c) => c.consecutive_failures >= FAILURE_ALERT_AFTER && !c.failure_alert_sent).map((c) => [c.id, c]));
+    if (failing.size) {
+      // Told already in this streak: emailed since the board last worked (or it never has).
+      const told = (w: WatchRow, c: CompanyRow) =>
+        !!w.failure_alerted_at && (!c.last_ok_at || Date.parse(w.failure_alerted_at) > Date.parse(c.last_ok_at));
+      const unsent = new Set<number>(); // boards with someone still to tell
       for (const person of people) {
         if (person.alerts_paused) continue;
-        const mine = watches.filter((w) => w.profile_id === person.id && failing.some((c) => c.id === w.company_id));
+        const mine = watches.filter((w) => w.profile_id === person.id && w.company_id !== null && failing.has(w.company_id) && !told(w, failing.get(w.company_id)!));
         if (!mine.length) continue;
         const list = mine.map((w) => {
-          const c = companies.get(w.company_id!)!;
+          const c = failing.get(w.company_id!)!;
           return { name: w.name, error: c.last_error ?? "", since: c.last_ok_at ?? undefined };
         });
         try {
           await mailer.send(healthEmail(person.email, list));
           heard.add(person.id);
           summary.alerts_sent++;
+          await store.markFailureAlerted(mine.map((w) => w.id), iso);
         } catch (e) {
-          allSent = false;
+          for (const w of mine) unsent.add(w.company_id!);
           summary.errors.push(`broken-board email failed: ${redact(msg(e))}`);
         }
       }
-      if (allSent) for (const c of failing) await store.updateCompany(c.id, { failure_alert_sent: true });
+      // Once everyone watching a board has been told, the board itself is marked, and later runs
+      // skip it without looking at each watch.
+      for (const c of failing.values()) if (!unsent.has(c.id)) await store.updateCompany(c.id, { failure_alert_sent: true });
     }
 
     // 5. Discover: VC portfolio boards, every few hours, summed up in a digest. A problem there never

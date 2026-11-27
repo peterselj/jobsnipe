@@ -13,7 +13,9 @@ export class MemoryStore implements Store {
   postingWrites = 0;
   alerts = new Set<string>();
   matches = new Map<string, MatchRow[]>();
-  runs: (RunSummary & { trigger: string; finished: boolean })[] = [];
+  runs: (RunSummary & { trigger: string; finished: boolean; finishedAt?: string })[] = [];
+  /** Stands in for the database clock when a run finishes. */
+  clock = () => new Date().toISOString();
   sources: DiscoverSourceRow[] = [];
   discover = new Map<string, DiscoverJob & { lastSeenAt: string }>();
   discoverMatches = new Map<string, DiscoverMatchRow[]>();
@@ -35,7 +37,10 @@ export class MemoryStore implements Store {
     return this.runs.length;
   }
   async finishRun(id: number, s: RunSummary) {
-    Object.assign(this.runs[id - 1], s, { finished: true });
+    Object.assign(this.runs[id - 1], s, { finished: true, finishedAt: this.clock() });
+  }
+  async lastRunFinishedAt() {
+    return this.runs.filter((r) => r.finishedAt).map((r) => r.finishedAt!).sort().at(-1) ?? null;
   }
   async people() {
     return this.people_;
@@ -78,6 +83,9 @@ export class MemoryStore implements Store {
   }
   async markBaselined(ids: number[], at: string) {
     for (const w of this.watches_) if (ids.includes(w.id)) w.baselined_at = at;
+  }
+  async markFailureAlerted(ids: number[], at: string) {
+    for (const w of this.watches_) if (ids.includes(w.id)) w.failure_alerted_at = at;
   }
   async syncMatches(profileId: string, rows: MatchRow[]) {
     this.matches.set(profileId, rows);

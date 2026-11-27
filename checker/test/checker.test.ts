@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makeMailer, type Email, type Mailer } from "../src/email.js";
 import { evaluate, titleCheck, toFilters } from "../src/filters.js";
 import { htmlToText, parseCompText } from "../src/normalize.js";
-import { runCheck as realRunCheck, type RunOptions } from "../src/run.js";
+import { backupNotNeeded, runCheck as realRunCheck, type RunOptions } from "../src/run.js";
 import { HttpError } from "../src/ats/http.js";
 import type { DiscoverJob } from "../src/discover/types.js";
 import type { Criteria, Posting } from "../src/types.js";
@@ -695,5 +695,144 @@ describe("Workday boards", () => {
     board = { postings: [wd("2")] };
     await runCheck({ store, mailer, fetch, fetchDetails, now: at(4) });
     expect(store.postings.get("workday:acme:1")!.closed).toBe(true);
+  });
+});
+
+describe("the backup schedule", () => {
+  const min = (m: number) => new Date(at(1).getTime() + m * 60_000);
+  const finishedAt = (when: Date) => {
+    const { store, mailer } = setup();
+    store.clock = () => when.toISOString();
+    return { store, mailer };
+  };
+
+  it("has nothing to do when a run finished in the last 70 minutes", async () => {
+    const { store, mailer } = finishedAt(at(1));
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [job("1")] }), now: at(1), trigger: "schedule" });
+    expect(await backupNotNeeded(store, "backup schedule", min(30))).toBe(true);
+    expect(await backupNotNeeded(store, "backup schedule", min(69))).toBe(true);
+  });
+
+  it("runs when the hourly timer has gone quiet, or has never run", async () => {
+    const { store, mailer } = finishedAt(at(1));
+    expect(await backupNotNeeded(store, "backup schedule", at(1))).toBe(false); // no run yet
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [job("1")] }), now: at(1), trigger: "schedule" });
+    expect(await backupNotNeeded(store, "backup schedule", min(71))).toBe(false);
+    expect(await backupNotNeeded(store, "backup schedule", min(180))).toBe(false);
+  });
+
+  it("never holds back the hourly timer or Check now, and doesn't count a run that never finished", async () => {
+    const { store, mailer } = finishedAt(at(1));
+    await runCheck({ store, mailer, fetch: async () => ({ postings: [job("1")] }), now: at(1), trigger: "schedule" });
+    for (const trigger of ["schedule", "check now", "manual"]) expect(await backupNotNeeded(store, trigger, min(5))).toBe(false);
+
+    const crashed = new MemoryStore();
+    await crashed.startRun("schedule"); // started, then the job died
+    expect(await backupNotNeeded(crashed, "backup schedule", new Date())).toBe(false);
+  });
+
+  it("runs anyway if it can't read the run history", async () => {
+    const broken = { lastRunFinishedAt: async () => { throw new Error("database unreachable"); } };
+    expect(await backupNotNeeded(broken, "backup schedule", at(1))).toBe(false);
+  });
+});
+
+describe("broken-board emails, per person", () => {
+  const health = (sent: Email[], to: string) => sent.filter((e) => e.to === to && /can't be checked/.test(e.subject));
+
+  /** Josh and Jake both watch Acme; Jake's address can be made to bounce. */
+  function twoWatchers() {
+    const { store } = setup();
+    store.watches_.push({ id: 3, profile_id: JAKE, company_id: 1, name: "Acme Corp", careers_url: null, note: null, baselined_at: null });
+    const sent: Email[] = [];
+    let jakeBounces = false;
+    const mailer: Mailer = {
+      describe: "test",
+      async send(e) {
+        if (jakeBounces && e.to === "jake@example.com") throw new Error("brevo rejected the address");
+        sent.push(e);
+      },
+    };
+    let broken = false;
+    const fetch = async () => {
+      if (broken) throw new Error("HTTP 404");
+      return { postings: [job("1")] };
+    };
+    return { store, sent, mailer, fetch, bounce: (v: boolean) => (jakeBounces = v), breakBoard: (v: boolean) => (broken = v) };
+  }
+
+  it("one failed send doesn't repeat the email to the people it already reached", async () => {
+    const { store, sent, mailer, fetch, bounce, breakBoard } = twoWatchers();
+    await runCheck({ store, mailer, fetch, now: at(1) });
+    breakBoard(true);
+    bounce(true);
+    for (const h of [2, 3, 4, 5]) await runCheck({ store, mailer, fetch, now: at(h) });
+    // Josh was told once (at the second failure), not once an hour while Jake's kept failing.
+    expect(health(sent, "josh@example.com")).toHaveLength(1);
+    expect(health(sent, "jake@example.com")).toHaveLength(0);
+    expect(store.companies_.get(1)!.failure_alert_sent).toBe(false); // Jake still hasn't been told
+
+    bounce(false);
+    const s = await runCheck({ store, mailer, fetch, now: at(6) });
+    expect(health(sent, "jake@example.com")).toHaveLength(1);
+    expect(health(sent, "josh@example.com")).toHaveLength(1);
+    expect(s.errors.filter((e) => e.startsWith("broken-board email"))).toEqual([]);
+    expect(store.companies_.get(1)!.failure_alert_sent).toBe(true);
+
+    await runCheck({ store, mailer, fetch, now: at(7) });
+    expect(health(sent, "josh@example.com").length + health(sent, "jake@example.com").length).toBe(2);
+  });
+
+  it("a board that recovers and breaks again is a new streak: everyone is told again, once", async () => {
+    const { store, sent, mailer, fetch, breakBoard } = twoWatchers();
+    await runCheck({ store, mailer, fetch, now: at(1) });
+    breakBoard(true);
+    for (const h of [2, 3, 4]) await runCheck({ store, mailer, fetch, now: at(h) });
+    breakBoard(false);
+    await runCheck({ store, mailer, fetch, now: at(5) });
+    breakBoard(true);
+    for (const h of [6, 7, 8]) await runCheck({ store, mailer, fetch, now: at(h) });
+    expect(health(sent, "josh@example.com")).toHaveLength(2);
+    expect(health(sent, "jake@example.com")).toHaveLength(2);
+  });
+});
+
+describe("a database error on one board", () => {
+  it("is reported for that board; other boards still save, match and alert, and it catches up next run", async () => {
+    const { store, sent, mailer } = setup();
+    store.addCompany(2, "ashby", "globex", "Globex");
+    store.watches_.push({ id: 3, profile_id: JOSH, company_id: 2, name: "Globex", careers_url: null, note: null, baselined_at: null });
+    const globex = (id: string) => post({ id: `ashby:globex:${id}`, companyKey: "ashby:globex", title: "Staff Product Manager", url: `https://globex/${id}`, source: "ashby" });
+    let acme = [job("1")];
+    let glob = [globex("1")];
+    const fetch = async (_ats: string, board: string) => ({ postings: board === "globex" ? glob : acme, etag: `v${acme.length + glob.length}` });
+    await runCheck({ store, mailer, fetch, now: at(1) });
+
+    // Hour 2: a new role on each board, and the database refuses Acme's (the first board) changes.
+    acme = [job("1"), job("2")];
+    glob = [globex("1"), globex("2")];
+    const save = store.applyPostingChanges.bind(store);
+    let refuse = true;
+    store.applyPostingChanges = async (c, ch, when) => {
+      if (refuse && c.id === 1) throw new Error("save new postings: connection reset talking to https://db.example/rest for josh@example.com");
+      return save(c, ch, when);
+    };
+    const s = await runCheck({ store, mailer, fetch, now: at(2) });
+
+    expect(s.errors).toEqual(["board #1: saving changes failed: save new postings: connection reset talking to <url> for <email>"]);
+    expect(store.runs.at(-1)).toMatchObject({ finished: true });
+    const news = () => sent.filter((e) => e.subject.startsWith("New match")).map((e) => e.text.match(/https:\/\/(acme|globex)\/\d/)![0]);
+    expect(news()).toEqual(["https://globex/2"]);
+    // Acme still shows what was stored; its new role isn't saved, matched or emailed yet.
+    expect(store.matches.get(JOSH)!.map((m) => m.posting_id).sort()).toEqual(["ashby:globex:1", "ashby:globex:2", "greenhouse:acme:1"]);
+    expect(store.postings.has("greenhouse:acme:2")).toBe(false);
+    expect(store.companies_.get(1)).toMatchObject({ consecutive_failures: 0, etag: "v2" }); // the board itself is fine; old tag kept
+
+    // Hour 3: the database is back. Acme is read again and its role arrives, once.
+    refuse = false;
+    await runCheck({ store, mailer, fetch, now: at(3) });
+    expect(news()).toEqual(["https://globex/2", "https://acme/2"]);
+    await runCheck({ store, mailer, fetch, now: at(4) });
+    expect(news()).toHaveLength(2);
   });
 });

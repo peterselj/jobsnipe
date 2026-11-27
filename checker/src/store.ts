@@ -25,6 +25,8 @@ export interface WatchRow {
   careers_url: string | null;
   note: string | null;
   baselined_at: string | null;
+  /** When this person was last emailed that this board can't be checked. */
+  failure_alerted_at?: string | null;
   filters?: WatchFilters | null;
 }
 
@@ -92,6 +94,8 @@ export interface RunSummary {
 export interface Store {
   startRun(trigger: string): Promise<number>;
   finishRun(id: number, s: RunSummary): Promise<void>;
+  /** When the most recent completed run finished (null: none has yet). */
+  lastRunFinishedAt(): Promise<string | null>;
   people(): Promise<Person[]>;
   watches(): Promise<WatchRow[]>;
   companies(ids: number[]): Promise<CompanyRow[]>;
@@ -108,6 +112,8 @@ export interface Store {
   /** Every role anyone has marked Interested, Not for me, or archived. */
   handled(): Promise<HandledRow[]>;
   markBaselined(watchIds: number[], at: string): Promise<void>;
+  /** These watches' people were just emailed that the board can't be checked. */
+  markFailureAlerted(watchIds: number[], at: string): Promise<void>;
   /** Make a person's matches exactly `rows`, in one transaction (the inbox never sees a gap). */
   syncMatches(profileId: string, rows: MatchRow[]): Promise<void>;
   prune(now: Date): Promise<void>;
@@ -189,13 +195,21 @@ export class SupabaseStore implements Store {
     this.check(await this.db.from("runs").update({ ...s, finished_at: new Date().toISOString() }).eq("id", id), "finish run");
   }
 
+  async lastRunFinishedAt() {
+    const rows = this.check(
+      await this.db.from("runs").select("finished_at").not("finished_at", "is", null).order("finished_at", { ascending: false }).limit(1),
+      "load last run",
+    ) as { finished_at: string }[] | null;
+    return rows?.[0]?.finished_at ?? null;
+  }
+
   async people() {
     return this.all<Person>("load profiles", (a, b) => this.db.from("profiles").select("id, name, email, criteria, alert_mode, alerts_paused, digest_every, last_digest_at, discover_on, monthly_note, quiet_since").order("id").range(a, b));
   }
 
   async watches() {
     return this.all<WatchRow>("load watches", (a, b) =>
-      this.db.from("watches").select("id, profile_id, company_id, name, careers_url, note, baselined_at, filters").order("id").range(a, b),
+      this.db.from("watches").select("id, profile_id, company_id, name, careers_url, note, baselined_at, failure_alerted_at, filters").order("id").range(a, b),
     );
   }
 
@@ -281,6 +295,12 @@ export class SupabaseStore implements Store {
     if (!watchIds.length) return;
     for (const batch of batches(watchIds)) {
       this.check(await this.db.from("watches").update({ baselined_at: at }).in("id", batch), "mark watches");
+    }
+  }
+
+  async markFailureAlerted(watchIds: number[], at: string) {
+    for (const batch of batches(watchIds)) {
+      this.check(await this.db.from("watches").update({ failure_alerted_at: at }).in("id", batch), "mark broken-board emails");
     }
   }
 
