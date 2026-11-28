@@ -263,10 +263,15 @@ export async function runDiscover(o: DiscoverOptions): Promise<{ boards: number;
     // With Discover off, only emailed jobs at companies on your list are kept (they go to the Inbox).
     const passing = person.discover_on === false ? [] : all.filter((x) => !x.onList);
     dedupe(passing);
-    await store.syncDiscoverMatches(person.id, [
-      ...listed.map(({ j, r }) => ({ posting_id: j.id, where_label: r.where ?? null, flags: r.flags, on_list: true })),
-      ...passing.map(({ j, r }) => ({ posting_id: j.id, where_label: r.where ?? null, flags: r.flags })),
-    ]);
+    try {
+      await store.syncDiscoverMatches(person.id, [
+        ...listed.map(({ j, r }) => ({ posting_id: j.id, where_label: r.where ?? null, flags: r.flags, on_list: true })),
+        ...passing.map(({ j, r }) => ({ posting_id: j.id, where_label: r.where ?? null, flags: r.flags })),
+      ]);
+    } catch (e) {
+      // One person's save failing leaves their Discover as it was; the people after them carry on.
+      out.errors.push(`saving one person's discover matches failed: ${o.redact(e instanceof Error ? e.message : String(e))}`);
+    }
     for (const { j, r } of listed) {
       const key = `${person.id}|${j.id}`;
       if (alerted.has(key)) continue;

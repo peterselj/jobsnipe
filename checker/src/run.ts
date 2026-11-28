@@ -305,7 +305,14 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
         }
       }
 
-      await store.syncMatches(person.id, matches);
+      // A database error saving one person's matches is theirs alone: their page shows last hour's
+      // list until the next run, and everyone after them still gets theirs. (No name: logs are public.)
+      try {
+        await store.syncMatches(person.id, matches);
+      } catch (e) {
+        summary.errors.push(`saving one person's matches failed: ${redact(msg(e))}`);
+        log(`✕ saving one person's matches failed: ${redact(msg(e))}`);
+      }
       standing.set(person.id, {
         watching: mine.filter((w) => w.company_id !== null && !companies.get(w.company_id)!.consecutive_failures).map((w) => w.name),
         notChecked: mine.filter((w) => w.company_id === null || companies.get(w.company_id)!.consecutive_failures > 0).map((w) => w.name),
@@ -328,7 +335,13 @@ export async function runCheck(opts: RunOptions): Promise<RunSummary> {
           summary.errors.push(`summary email failed: ${redact(msg(e))}`);
         }
       }
-      await store.recordAlerts(newAlerts);
+      // If this fails the emails above have still gone out, and may be sent once more next hour.
+      try {
+        await store.recordAlerts(newAlerts);
+      } catch (e) {
+        summary.errors.push(`recording one person's sent alerts failed: ${redact(msg(e))}`);
+        log(`✕ recording one person's sent alerts failed: ${redact(msg(e))}`);
+      }
     }
 
     // 4. Broken boards: one email per failure streak, to everyone watching. Each person's email is
