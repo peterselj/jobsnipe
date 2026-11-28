@@ -836,3 +836,76 @@ describe("a database error on one board", () => {
     expect(news()).toHaveLength(2);
   });
 });
+
+describe("a database error saving one person's matches", () => {
+  /** Josh (first) and Jake both watch Acme with the same filters. */
+  function twoPeople() {
+    const { store, sent, mailer } = setup();
+    store.people_[1].criteria = CRITERIA;
+    store.watches_.push({ id: 3, profile_id: JAKE, company_id: 1, name: "Acme", careers_url: null, note: null, baselined_at: null });
+    const news = (to: string) => sent.filter((e) => e.to === to && e.subject.startsWith("New match"));
+    return { store, sent, mailer, news };
+  }
+
+  it("is reported once; the people after them still get their matches and emails, and it catches up next run", async () => {
+    const { store, mailer, news } = twoPeople();
+    let board = [job("1")];
+    const fetch = async () => ({ postings: board });
+    await runCheck({ store, mailer, fetch, now: at(1) });
+
+    board = [job("1"), job("2")];
+    const save = store.syncMatches.bind(store);
+    let refuse = true;
+    store.syncMatches = async (who, rows) => {
+      if (refuse && who === JOSH) throw new Error("save matches: connection reset for josh@example.com");
+      return save(who, rows);
+    };
+    const s = await runCheck({ store, mailer, fetch, now: at(2) });
+
+    expect(s.errors).toEqual(["saving one person's matches failed: save matches: connection reset for <email>"]);
+    expect(store.runs.at(-1)).toMatchObject({ finished: true });
+    // Jake, who comes after Josh, is untouched by Josh's error.
+    expect(store.matches.get(JAKE)!.map((m) => m.posting_id)).toEqual(["greenhouse:acme:1", "greenhouse:acme:2"]);
+    expect(news("jake@example.com")).toHaveLength(1);
+    // Josh's page still shows last hour's list. His email went out and is remembered as sent.
+    expect(store.matches.get(JOSH)!.map((m) => m.posting_id)).toEqual(["greenhouse:acme:1"]);
+    expect(news("josh@example.com")).toHaveLength(1);
+
+    refuse = false;
+    await runCheck({ store, mailer, fetch, now: at(3) });
+    expect(store.matches.get(JOSH)!.map((m) => m.posting_id)).toEqual(["greenhouse:acme:1", "greenhouse:acme:2"]);
+    expect(news("josh@example.com")).toHaveLength(1); // not emailed twice
+  });
+
+  it("a failure recording sent alerts doesn't stop the run either", async () => {
+    const { store, mailer, news } = twoPeople();
+    let board = [job("1")];
+    const fetch = async () => ({ postings: board });
+    await runCheck({ store, mailer, fetch, now: at(1) });
+    board = [job("1"), job("2")];
+    const record = store.recordAlerts.bind(store);
+    store.recordAlerts = async (rows) => {
+      if (rows.some((r) => r.profile_id === JOSH)) throw new Error("record alerts: timeout");
+      return record(rows);
+    };
+    const s = await runCheck({ store, mailer, fetch, now: at(2) });
+    expect(s.errors).toEqual(["recording one person's sent alerts failed: record alerts: timeout"]);
+    expect(news("jake@example.com")).toHaveLength(1);
+    expect(store.alerts.has(`${JAKE}|greenhouse:acme:2`)).toBe(true);
+  });
+
+  it("in Discover, one person's failed save leaves the next person's Discover intact", async () => {
+    const { store, mailer } = twoPeople();
+    store.addSource(1, "Board A");
+    for (const p of store.people_) p.discover_on = true;
+    const found: DiscoverJob = { id: "d:1", company: "Globex", title: "Senior Product Manager", locations: ["New York, NY"], url: "https://globex/1", via: ["Board A"] };
+    const save = store.syncDiscoverMatches.bind(store);
+    store.syncDiscoverMatches = async (who, rows) => {
+      if (who === JOSH) throw new Error("save discover matches: timeout");
+      return save(who, rows);
+    };
+    const s = await runCheck({ store, mailer, fetch: async () => ({ postings: [] }), searchDiscover: async () => ({ jobs: [found], collectionId: "c" }), now: at(1) });
+    expect(s.errors).toEqual(["saving one person's discover matches failed: save discover matches: timeout"]);
+    expect(store.discoverMatches.get(JAKE)!.map((m) => m.posting_id)).toEqual(["d:1"]);
+  });
+});
